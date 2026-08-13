@@ -112,3 +112,11 @@ temp/
 dist/
 build/
 *.egg-info/
+
+# ============================================================
+# Dados DEMO pequenos usados no deploy
+# ============================================================
+!data/demo/
+!data/demo/*.geojson
+!data/demo/*.parquet
+!data/demo/*.csv
