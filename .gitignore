@@ -114,9 +114,13 @@ build/
 *.egg-info/
 
 # ============================================================
-# Dados DEMO pequenos usados no deploy
+# ARQUIVOS REAIS NECESSÁRIOS AO DASHBOARD EM PRODUÇÃO
 # ============================================================
-!data/demo/
-!data/demo/*.geojson
-!data/demo/*.parquet
-!data/demo/*.csv
+
+!data/processed/
+data/processed/*
+!data/processed/flashes_enriched.parquet
+
+!data/municipalities/
+data/municipalities/*
+!data/municipalities/municipios_brasil_web.geojson

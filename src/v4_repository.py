@@ -15,10 +15,7 @@ def processed_dir() -> Path:
     custom = os.getenv("GLM_PROCESSED_DIR")
     if custom:
         return Path(custom)
-    if (PROCESSED_DIR / "flashes_enriched.parquet").exists() or (PROCESSED_DIR / "flashes_enriched.csv").exists():
-        return PROCESSED_DIR
-    return Path(__file__).resolve().parents[1] / "data" / "demo" / "processed"
-
+    return PROCESSED_DIR
 
 def flashes_dir() -> Path:
     return Path(os.getenv("GLM_FLASHES_DIR", DATA_DIR / "flashes"))

@@ -20,19 +20,40 @@ def _load_geometry_cached(path_str: str) -> gpd.GeoDataFrame:
 
 def geometry_path() -> Path:
     custom_web = os.getenv("GLM_MUNICIPALITIES_WEB_FILE")
-    if custom_web and Path(custom_web).exists():
-        return Path(custom_web)
-    custom = os.getenv("GLM_MUNICIPALITIES_FILE")
-    if custom and Path(custom).exists():
-        p = Path(custom)
-        web = p.with_name("municipios_brasil_web.geojson")
-        return web if web.exists() else p
-    for name in ["municipios_brasil_web.geojson", "municipios_brasil_web.gpkg", "municipios_brasil.gpkg", "municipios_brasil.geojson"]:
-        p = MUNICIPALITIES_DIR / name
+
+    if custom_web:
+        p = Path(custom_web)
         if p.exists():
             return p
-    return Path(__file__).resolve().parents[1] / "data" / "demo" / "municipalities.geojson"
 
+    custom = os.getenv("GLM_MUNICIPALITIES_FILE")
+
+    if custom:
+        p = Path(custom)
+
+        if p.exists():
+            web = p.with_name("municipios_brasil_web.geojson")
+
+            if web.exists():
+                return web
+
+            return p
+
+    candidates = [
+        MUNICIPALITIES_DIR / "municipios_brasil_web.geojson",
+        MUNICIPALITIES_DIR / "municipios_brasil_web.gpkg",
+        MUNICIPALITIES_DIR / "municipios_brasil.gpkg",
+        MUNICIPALITIES_DIR / "municipios_brasil.geojson",
+    ]
+
+    for path in candidates:
+        if path.exists():
+            return path
+
+    raise FileNotFoundError(
+        "Malha municipal não encontrada. "
+        "Esperado: data/municipalities/municipios_brasil_web.geojson"
+    )
 
 def load_municipalities_web() -> gpd.GeoDataFrame:
     return _load_geometry_cached(str(geometry_path())).copy()
