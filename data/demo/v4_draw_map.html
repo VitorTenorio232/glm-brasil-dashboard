@@ -1,0 +1,178 @@
+<!DOCTYPE html>
+<html>
+<head>
+    
+    <meta http-equiv="content-type" content="text/html; charset=UTF-8" />
+    <script src="https://cdn.jsdelivr.net/npm/leaflet@1.9.3/dist/leaflet.js"></script>
+    <script src="https://code.jquery.com/jquery-3.7.1.min.js"></script>
+    <script src="https://cdn.jsdelivr.net/npm/bootstrap@5.2.2/dist/js/bootstrap.bundle.min.js"></script>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/Leaflet.awesome-markers/2.0.2/leaflet.awesome-markers.js"></script>
+    <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/leaflet@1.9.3/dist/leaflet.css"/>
+    <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/bootstrap@5.2.2/dist/css/bootstrap.min.css"/>
+    <link rel="stylesheet" href="https://netdna.bootstrapcdn.com/bootstrap/3.0.0/css/bootstrap-glyphicons.css"/>
+    <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/@fortawesome/fontawesome-free@6.2.0/css/all.min.css"/>
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/Leaflet.awesome-markers/2.0.2/leaflet.awesome-markers.css"/>
+    <link rel="stylesheet" href="https://cdn.jsdelivr.net/gh/python-visualization/folium/folium/templates/leaflet.awesome.rotate.min.css"/>
+    
+            <meta name="viewport" content="width=device-width,
+                initial-scale=1.0, maximum-scale=1.0, user-scalable=no" />
+            <style>
+                #map_f10386c3e3eac05101df21ad3f3efcd2 {
+                    position: relative;
+                    width: 100.0%;
+                    height: 100.0%;
+                    left: 0.0%;
+                    top: 0.0%;
+                }
+                .leaflet-container { font-size: 1rem; }
+            </style>
+
+            <style>html, body {
+                width: 100%;
+                height: 100%;
+                margin: 0;
+                padding: 0;
+            }
+            </style>
+
+            <style>#map {
+                position:absolute;
+                top:0;
+                bottom:0;
+                right:0;
+                left:0;
+                }
+            </style>
+
+            <script>
+                L_NO_TOUCH = false;
+                L_DISABLE_3D = false;
+            </script>
+
+        
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/leaflet.draw/1.0.2/leaflet.draw.js"></script>
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/leaflet.draw/1.0.2/leaflet.draw.css"/>
+</head>
+<body>
+    
+    
+            <div class="folium-map" id="map_f10386c3e3eac05101df21ad3f3efcd2" ></div>
+        
+    
+            
+        
+</body>
+<script>
+    
+    
+            var map_f10386c3e3eac05101df21ad3f3efcd2 = L.map(
+                "map_f10386c3e3eac05101df21ad3f3efcd2",
+                {
+                    center: [-14.2, -51.9],
+                    crs: L.CRS.EPSG3857,
+                    ...{
+  "zoom": 4,
+  "zoomControl": true,
+  "preferCanvas": true,
+}
+
+                }
+            );
+            L.control.scale().addTo(map_f10386c3e3eac05101df21ad3f3efcd2);
+
+            
+
+        
+    
+            var tile_layer_6fff652f0c9276f8b97c98937c22d440 = L.tileLayer(
+                "https://server.arcgisonline.com/ArcGIS/rest/services/World_Imagery/MapServer/tile/{z}/{y}/{x}",
+                {
+  "minZoom": 0,
+  "maxZoom": 19,
+  "maxNativeZoom": 19,
+  "noWrap": false,
+  "attribution": "Tiles \u00a9 Esri \u2014 Source: Esri, Maxar, Earthstar Geographics, and the GIS User Community",
+  "subdomains": "abc",
+  "detectRetina": false,
+  "tms": false,
+  "opacity": 1,
+}
+
+            );
+        
+    
+            tile_layer_6fff652f0c9276f8b97c98937c22d440.addTo(map_f10386c3e3eac05101df21ad3f3efcd2);
+        
+    
+            var tile_layer_47908ab2f273dc784e396eba45cb0e0f = L.tileLayer(
+                "https://services.arcgisonline.com/ArcGIS/rest/services/Reference/World_Boundaries_and_Places/MapServer/tile/{z}/{y}/{x}",
+                {
+  "minZoom": 0,
+  "maxZoom": 19,
+  "maxNativeZoom": 19,
+  "noWrap": false,
+  "attribution": "Esri",
+  "subdomains": "abc",
+  "detectRetina": false,
+  "tms": false,
+  "opacity": 0.9,
+}
+
+            );
+        
+    
+            tile_layer_47908ab2f273dc784e396eba45cb0e0f.addTo(map_f10386c3e3eac05101df21ad3f3efcd2);
+        
+    
+            var options = {
+              position: "topleft",
+              draw: {"circle": false, "circlemarker": false, "marker": false, "polygon": {"allowIntersection": false, "showArea": true}, "polyline": false, "rectangle": {"showArea": true}},
+              edit: {"edit": true, "remove": true},
+            }
+                // FeatureGroup is to store editable layers.
+                var drawnItems_draw_control_0c84aa4622b6fe95c4276b8458f384f2 =
+                    new L.featureGroup().addTo(
+                        map_f10386c3e3eac05101df21ad3f3efcd2
+                    );
+
+            options.edit.featureGroup = drawnItems_draw_control_0c84aa4622b6fe95c4276b8458f384f2;
+            var draw_control_0c84aa4622b6fe95c4276b8458f384f2 = new L.Control.Draw(
+                options
+            ).addTo( map_f10386c3e3eac05101df21ad3f3efcd2 );
+            map_f10386c3e3eac05101df21ad3f3efcd2.on(L.Draw.Event.CREATED, function(e) {
+                var layer = e.layer,
+                    type = e.layerType;
+                var coords = JSON.stringify(layer.toGeoJSON());
+                layer.on('click', function() {
+                    alert(coords);
+                    console.log(coords);
+                });
+                drawnItems_draw_control_0c84aa4622b6fe95c4276b8458f384f2.addLayer(layer);
+            });
+            map_f10386c3e3eac05101df21ad3f3efcd2.on('draw:created', function(e) {
+                drawnItems_draw_control_0c84aa4622b6fe95c4276b8458f384f2.addLayer(e.layer);
+            });
+
+            
+        
+    
+            var layer_control_4f0118814ae0c09e1cb0836b23356c94_layers = {
+                base_layers : {
+                },
+                overlays :  {
+                    "Nomes e limites" : tile_layer_47908ab2f273dc784e396eba45cb0e0f,
+                },
+            };
+            let layer_control_4f0118814ae0c09e1cb0836b23356c94 = L.control.layers(
+                layer_control_4f0118814ae0c09e1cb0836b23356c94_layers.base_layers,
+                layer_control_4f0118814ae0c09e1cb0836b23356c94_layers.overlays,
+                {
+  "position": "topright",
+  "collapsed": true,
+  "autoZIndex": true,
+}
+            ).addTo(map_f10386c3e3eac05101df21ad3f3efcd2);
+
+        
+</script>
+</html>
