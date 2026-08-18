@@ -21,6 +21,27 @@ st.caption(
     "e o sistema calcula os produtos GLM para exatamente essa área."
 )
 
+# -----------------------------------------------------------------------------
+# HISTÓRICO: aguardando a base processada
+# -----------------------------------------------------------------------------
+HISTORICAL_ANALYSIS_AVAILABLE = False
+
+if not HISTORICAL_ANALYSIS_AVAILABLE:
+    st.info(
+        "🚧 **Análises históricas — Em breve.** A base GLM processada está sendo preparada "
+        "e este módulo será habilitado assim que os arquivos estiverem disponíveis."
+    )
+    st.success(
+        "📡 O **Monitoramento GLM em tempo real** já está disponível com os últimos 30 minutos."
+    )
+    st.page_link(
+        "pages/02_Monitoramento.py",
+        label="Abrir monitoramento em tempo real",
+        icon="📡",
+        use_container_width=True,
+    )
+    st.stop()
+
 repo = FlashesRepository()
 if not repo.exists():
     st.error("A base de flashes individuais ainda não está disponível.")

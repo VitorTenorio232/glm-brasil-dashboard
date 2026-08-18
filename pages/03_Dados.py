@@ -1,32 +1,23 @@
 from __future__ import annotations
+
 import streamlit as st
-from src.v4_repository import FlashesRepository
-from src.v4_ui import geometry_path
 
 st.set_page_config(page_title="Dados GLM", page_icon="💾", layout="wide")
-st.title("💾 Dados e estado do pipeline")
-repo = FlashesRepository()
+st.title("💾 Dados históricos GLM")
 
-if repo.exists():
-    tmin, tmax = repo.available_range()
-    st.success("Base individual de flashes disponível.")
-    st.write(f"**Fonte:** `{repo.source_description()}`")
-    st.write(f"**Período UTC:** {tmin} → {tmax}")
-else:
-    st.error("Base individual de flashes não encontrada.")
+st.info("🚧 **Em breve.** A base histórica GLM está sendo processada e será conectada ao dashboard quando estiver disponível.")
+st.markdown(
+    """
+Enquanto isso, o módulo **📡 Monitoramento** funciona independentemente da base histórica e consulta
+os arquivos GLM-L2-LCFA mais recentes diretamente no NOAA/AWS.
 
-st.write(f"**Geometria usada no frontend:** `{geometry_path()}`")
+Quando os dados processados forem disponibilizados, este espaço voltará a apresentar:
 
-st.subheader("Processamento de um intervalo GLM")
-st.code("""python scripts/process_glm.py \\
-  --raw-dir data/raw \\
-  --municipalities data/municipalities/municipios_brasil.gpkg \\
-  --output data/processed \\
-  --save-flashes""")
-
-st.subheader("Histórico grande")
-st.code("""python scripts/ingest_partitioned.py \\
-  --raw-dir data/raw \\
-  --municipalities data/municipalities/municipios_brasil.gpkg \\
-  --output data/flashes""")
-st.info("No V4, os cálculos da Análise partem dos flashes individuais. As tabelas diária/mensal/anual são produtos derivados da seleção do usuário.")
+- período histórico disponível;
+- estado do processamento;
+- produtos diários, mensais e anuais;
+- climatologia e anomalias;
+- rankings e análises por município/estado/região personalizada.
+"""
+)
+st.page_link("pages/02_Monitoramento.py", label="Abrir monitoramento em tempo real", icon="📡")

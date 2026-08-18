@@ -1,126 +1,14 @@
-# ============================================================
-# Python
-# ============================================================
 .venv/
-venv/
-env/
 __pycache__/
 *.py[cod]
-*$py.class
 .pytest_cache/
-.mypy_cache/
-.ruff_cache/
-.coverage
-htmlcov/
-
-# ============================================================
-# Jupyter
-# ============================================================
-.ipynb_checkpoints/
-
-# ============================================================
-# VS Code / IDEs
-# ============================================================
-.vscode/
-.idea/
-
-# ============================================================
-# Sistema operacional
-# ============================================================
-.DS_Store
-Thumbs.db
-*~
-
-# ============================================================
-# Streamlit / credenciais
-# ============================================================
 .streamlit/secrets.toml
-
-# Mantém arquivos de exemplo
-!.streamlit/secrets.toml.example
-!.streamlit/config.toml
-
-# ============================================================
-# Variáveis de ambiente / segredos
-# ============================================================
+*.json
 .env
-.env.*
-!.env.example
-*.pem
-*.key
-credentials.json
-service-account*.json
-
-# ============================================================
-# DADOS GLM
-# Nunca versionar os dados brutos/processados
-# ============================================================
-data/raw/
-data/processed/
-data/flashes/
-
-# ============================================================
-# Malhas geográficas geradas
-# ============================================================
-data/municipalities/
-
-# ============================================================
-# Grandes formatos científicos/geoespaciais
-# ============================================================
-*.nc
-*.nc4
-*.h5
-*.hdf5
-*.grib
-*.grb
-*.grib2
-
-*.parquet
-*.feather
-
-*.gpkg
-
-*.shp
-*.shx
-*.dbf
-*.prj
-*.cpg
-*.qmd
-
-# GeoJSON pode ficar gigantesco
-*.geojson
-
-# ============================================================
-# DuckDB / bancos locais
-# ============================================================
-*.duckdb
-*.db
-*.sqlite
-*.sqlite3
-
-# ============================================================
-# Logs e temporários
-# ============================================================
-*.log
-logs/
-tmp/
-temp/
-
-# ============================================================
-# Builds / arquivos compactados gerados
-# ============================================================
-dist/
-build/
-*.egg-info/
-
-# ============================================================
-# ARQUIVOS REAIS NECESSÁRIOS AO DASHBOARD EM PRODUÇÃO
-# ============================================================
-
-!data/processed/
-data/processed/*
-!data/processed/flashes_enriched.parquet
-
-!data/municipalities/
-data/municipalities/*
-!data/municipalities/municipios_brasil_web.geojson
+.DS_Store
+# Dados reais GLM são grandes
+data/raw/*.nc
+data/processed/*.parquet
+data/processed/*.csv
+# Preserve a demo pequena
+!data/demo/**

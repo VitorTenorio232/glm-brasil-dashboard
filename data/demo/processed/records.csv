@@ -1,0 +1,4 @@
+code_muni,name_muni,abbrev_state,record_daily_flashes,record_daily_date,record_hourly_flashes,record_hourly_date,record_hourly_hour
+9990001,Município Alpha,XX,60,2025-01-10,60,2025-01-10,18
+9990002,Município Beta,XX,98,2025-12-20,98,2025-12-20,21
+9990003,Município Gamma,YY,43,2025-01-10,43,2025-01-10,18
