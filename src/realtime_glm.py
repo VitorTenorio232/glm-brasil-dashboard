@@ -19,9 +19,9 @@ LIVE_CACHE_DIR = Path(tempfile.gettempdir()) / "glm_brasil_live"
 
 AGE_GROUPS = [
     ("0–5 min", 0.0, 5.0, "#ff2d20"),
-    ("5–10 min", 5.0, 10.0, "#1787ff"),
+    ("5–10 min", 5.0, 10.0, "#f4b942"),
     ("10–20 min", 10.0, 20.0, "#24c96b"),
-    ("20–30 min", 20.0, 30.000001, "#f5b942"),
+    ("20–30 min", 20.0, 30.000001, "#1787ff"),
 ]
 
 
@@ -254,8 +254,8 @@ def build_live_map(df: pd.DataFrame):
         max_zoom=19,
     ).add_to(m)
 
-    # Mais antigo primeiro; o grupo mais novo fica por cima quando os clusters se abrem.
-    for label, _, _, color in reversed(AGE_GROUPS):
+    # Ordem visual solicitada no controle: 0–5, 5–10, 10–20, 20–30 min.
+    for label, _, _, color in AGE_GROUPS:
         sub = df[df.get("age_group", pd.Series(index=df.index, dtype="object")) == label]
         data = []
         for _, row in sub.iterrows():

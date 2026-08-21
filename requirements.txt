@@ -1,23 +1,13 @@
+# Dependências da versão operacional atual do LUME-GLM.
+# As bibliotecas históricas/geoespaciais serão reincorporadas quando a base histórica entrar em produção.
 streamlit>=1.48,<2
 streamlit-folium>=0.25
 folium>=0.20
 branca>=0.8
-plotly>=6.2
 pandas>=2.2
 numpy>=2.0
 xarray>=2025.1
 netCDF4>=1.7
-scipy>=1.14
 boto3>=1.35
 botocore>=1.35
-geopandas>=1.0
-shapely>=2.0
-pyogrio>=0.10
-pyproj>=3.7
-geobr==1.0.0
-pyarrow>=18
-duckdb>=1.3
-earthengine-api>=1.5
-geemap>=0.36
-google-auth>=2.40
 pytz

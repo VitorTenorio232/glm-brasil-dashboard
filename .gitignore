@@ -12,3 +12,4 @@ data/processed/*.parquet
 data/processed/*.csv
 # Preserve a demo pequena
 !data/demo/**
+_backup_antes_lume_*/

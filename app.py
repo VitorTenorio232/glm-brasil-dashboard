@@ -1,466 +1,388 @@
 from __future__ import annotations
 
-from datetime import date, datetime, time, timezone, timedelta
-import json
-import numpy as np
-import pandas as pd
+import html
+
 import streamlit as st
-import plotly.express as px
-from shapely.geometry import shape
+from streamlit_folium import st_folium
 
-from src.v4_repository import FlashesRepository
-from src.v4_analysis import calculate_analysis, area_km2, filter_by_geometry, MONTH_NAMES
-from src.v4_maps import build_draw_map, build_analysis_map
-from src.v4_ui import load_municipalities_web, format_int, format_float, geometry_path
+from src.realtime_glm import AGE_GROUPS, build_live_map, fetch_live_snapshot, group_counts
 
-st.set_page_config(page_title="GLM Brasil V4", page_icon="⚡", layout="wide")
 
-st.title("⚡ GLM Brasil — Análise espacial de relâmpagos")
-st.caption(
-    "Selecione Município, Estado ou uma Região personalizada; escolha o período; "
-    "e o sistema calcula os produtos GLM para exatamente essa área."
+# =============================================================================
+# CONFIGURAÇÃO DA PÁGINA
+# =============================================================================
+st.set_page_config(
+    page_title="LUME-GLM",
+    page_icon="⚡",
+    layout="wide",
+    initial_sidebar_state="collapsed",
 )
 
-# -----------------------------------------------------------------------------
-# HISTÓRICO: aguardando a base processada
-# -----------------------------------------------------------------------------
-HISTORICAL_ANALYSIS_AVAILABLE = False
 
-if not HISTORICAL_ANALYSIS_AVAILABLE:
-    st.info(
-        "🚧 **Análises históricas — Em breve.** A base GLM processada está sendo preparada "
-        "e este módulo será habilitado assim que os arquivos estiverem disponíveis."
-    )
-    st.success(
-        "📡 O **Monitoramento GLM em tempo real** já está disponível com os últimos 30 minutos."
-    )
-    st.page_link(
-        "pages/02_Monitoramento.py",
-        label="Abrir monitoramento em tempo real",
-        icon="📡",
-        use_container_width=True,
-    )
-    st.stop()
+# =============================================================================
+# ESTILO VISUAL
+# =============================================================================
+st.markdown(
+    """
+    <style>
+    /* Remove a navegação lateral antiga: o LUME-GLM usa somente as três abas. */
+    [data-testid="stSidebar"],
+    [data-testid="stSidebarCollapsedControl"] {
+        display: none !important;
+    }
 
-repo = FlashesRepository()
-if not repo.exists():
-    st.error("A base de flashes individuais ainda não está disponível.")
-    st.code(
-        "python scripts/process_glm.py --raw-dir data/raw "
-        "--municipalities data/municipalities/municipios_brasil.gpkg "
-        "--output data/processed --save-flashes"
-    )
-    st.stop()
+    .block-container {
+        max-width: 1550px;
+        padding-top: 1.25rem;
+        padding-bottom: 2.5rem;
+    }
 
-try:
-    tmin, tmax = repo.available_range()
-except Exception as exc:
-    st.error("Não foi possível identificar o período disponível na base de flashes.")
-    st.exception(exc)
-    st.stop()
+    .lume-header {
+        padding: 0.2rem 0 0.85rem 0;
+    }
 
-muni = load_municipalities_web()
+    .lume-title {
+        margin: 0;
+        font-size: 2.55rem;
+        line-height: 1.05;
+        font-weight: 800;
+        letter-spacing: -0.04rem;
+        color: #0f172a;
+    }
 
-# -----------------------------------------------------------------------------
-# 1) SELEÇÃO DA ÁREA
-# -----------------------------------------------------------------------------
-st.sidebar.header("1. Área de análise")
-selection_type = st.sidebar.radio(
-    "Tipo de área",
-    ["Município", "Estado", "Região personalizada"],
-    index=0,
+    .lume-subtitle {
+        margin-top: 0.45rem;
+        color: #64748b;
+        font-size: 1.02rem;
+    }
+
+    .metric-card {
+        background: #ffffff;
+        border: 1px solid #e6eaf0;
+        border-radius: 14px;
+        padding: 18px 20px 17px 20px;
+        min-height: 118px;
+        box-shadow: 0 4px 15px rgba(15, 23, 42, 0.07);
+    }
+
+    .metric-card-label {
+        color: #64748b;
+        font-size: 0.88rem;
+        font-weight: 600;
+        margin-bottom: 10px;
+    }
+
+    .metric-card-value {
+        color: #0f172a;
+        font-size: 1.95rem;
+        line-height: 1.05;
+        font-weight: 700;
+        white-space: nowrap;
+    }
+
+    .metric-card-small {
+        color: #94a3b8;
+        font-size: 0.76rem;
+        margin-top: 8px;
+    }
+
+    .time-card {
+        background: #ffffff;
+        border: 1px solid #e6eaf0;
+        border-radius: 13px;
+        padding: 16px 18px 17px 18px;
+        min-height: 106px;
+        box-shadow: 0 3px 12px rgba(15, 23, 42, 0.06);
+        border-top: 5px solid var(--accent);
+    }
+
+    .time-card-header {
+        display: flex;
+        align-items: center;
+        gap: 8px;
+        font-size: 0.92rem;
+        font-weight: 650;
+        color: #334155;
+    }
+
+    .time-dot {
+        width: 11px;
+        height: 11px;
+        border-radius: 50%;
+        background: var(--accent);
+        flex: 0 0 11px;
+    }
+
+    .time-card-value {
+        margin-top: 10px;
+        color: #0f172a;
+        font-size: 1.8rem;
+        line-height: 1;
+        font-weight: 750;
+    }
+
+    .section-heading {
+        margin-top: 0.25rem;
+        margin-bottom: 0.75rem;
+        color: #0f172a;
+        font-size: 1.35rem;
+        font-weight: 750;
+    }
+
+    .coming-soon {
+        margin-top: 1rem;
+        padding: 24px;
+        background: linear-gradient(135deg, #f8fafc, #f1f5f9);
+        border: 1px solid #e2e8f0;
+        border-radius: 14px;
+    }
+
+    .coming-soon h3 {
+        margin-top: 0;
+        color: #0f172a;
+    }
+
+    .coming-soon p {
+        color: #64748b;
+        margin-bottom: 0;
+    }
+
+    /* Aba com visual mais compacto e semelhante a painel. */
+    button[data-baseweb="tab"] p {
+        font-size: 1rem;
+        font-weight: 650;
+    }
+
+    div[data-testid="stHorizontalBlock"] {
+        gap: 0.85rem;
+    }
+    </style>
+    """,
+    unsafe_allow_html=True,
 )
 
-selected_geometry = None
-selection_label = None
-selected_code = None
-selected_state = None
 
-states = sorted(muni["abbrev_state"].dropna().astype(str).unique())
+# =============================================================================
+# HELPERS VISUAIS
+# =============================================================================
+def _fmt_int(value: int) -> str:
+    return f"{int(value):,}".replace(",", ".")
 
-if selection_type == "Município":
-    state_choice = st.sidebar.selectbox(
-        "Estado", ["— Selecione —"] + states, index=0
-    )
-    if state_choice == "— Selecione —":
-        st.info("Selecione um estado e um município para iniciar a análise.")
-        st.stop()
-    selected_state = state_choice
-    mstate = muni[muni["abbrev_state"].astype(str) == selected_state].copy()
-    city_names = sorted(mstate["name_muni"].astype(str).unique())
-    city_choice = st.sidebar.selectbox(
-        "Município", ["— Selecione —"] + city_names, index=0
-    )
-    if city_choice == "— Selecione —":
-        st.info("Agora selecione o município que deseja analisar.")
-        st.stop()
-    selected_city = city_choice
-    row = mstate[mstate["name_muni"].astype(str) == selected_city].iloc[0]
-    selected_code = str(row["code_muni"]).replace(".0", "")
-    selected_geometry = row.geometry
-    selection_label = f"{selected_city} - {selected_state}"
-    selection_area = float(row.get("area_muni_km2", np.nan))
-    if not np.isfinite(selection_area):
-        selection_area = area_km2(selected_geometry)
 
-elif selection_type == "Estado":
-    state_choice = st.sidebar.selectbox(
-        "Estado", ["— Selecione —"] + states, index=0
+def _card(label: str, value: str, small: str = "") -> None:
+    st.markdown(
+        f"""
+        <div class="metric-card">
+            <div class="metric-card-label">{html.escape(label)}</div>
+            <div class="metric-card-value">{html.escape(value)}</div>
+            {f'<div class="metric-card-small">{html.escape(small)}</div>' if small else ''}
+        </div>
+        """,
+        unsafe_allow_html=True,
     )
-    if state_choice == "— Selecione —":
-        st.info("Selecione o estado que deseja analisar.")
-        st.stop()
-    selected_state = state_choice
-    mstate = muni[muni["abbrev_state"].astype(str) == selected_state].copy()
+
+
+def _time_card(label: str, value: int, color: str) -> None:
+    st.markdown(
+        f"""
+        <div class="time-card" style="--accent:{color};">
+            <div class="time-card-header">
+                <span class="time-dot"></span>
+                <span>{html.escape(label)}</span>
+            </div>
+            <div class="time-card-value">{_fmt_int(value)}</div>
+        </div>
+        """,
+        unsafe_allow_html=True,
+    )
+
+
+# =============================================================================
+# CABEÇALHO
+# =============================================================================
+st.markdown(
+    """
+    <div class="lume-header">
+        <h1 class="lume-title">⚡ LUME-GLM</h1>
+        <div class="lume-subtitle">
+            Monitoramento e análise de relâmpagos com dados do Geostationary Lightning Mapper (GLM) sobre o Brasil
+        </div>
+    </div>
+    """,
+    unsafe_allow_html=True,
+)
+
+
+# =============================================================================
+# APENAS 3 ABAS PRINCIPAIS
+# =============================================================================
+tab_live, tab_clim, tab_series = st.tabs(
+    [
+        "⚡ Relâmpagos em tempo real",
+        "🌦️ Climatologia",
+        "📈 Séries temporais",
+    ]
+)
+
+
+# =============================================================================
+# ABA 1 — RELÂMPAGOS EM TEMPO REAL
+# =============================================================================
+@st.cache_data(ttl=50, show_spinner=False)
+def _load_snapshot():
+    return fetch_live_snapshot(window_minutes=30, quality="zero_only")
+
+
+@st.fragment(run_every="60s")
+def _live_panel():
+    action_left, action_right = st.columns([0.84, 0.16])
+    with action_left:
+        st.caption(
+            "Últimos 30 minutos disponíveis do produto GLM-L2-LCFA do GOES-19. "
+            "Atualização automática a cada 60 segundos."
+        )
+    with action_right:
+        if st.button("🔄 Atualizar agora", use_container_width=True, key="refresh_live"):
+            _load_snapshot.clear()
+
     try:
-        selected_geometry = mstate.geometry.union_all()
-    except Exception:
-        selected_geometry = mstate.geometry.unary_union
-    selection_label = selected_state
-    if "area_muni_km2" in mstate.columns:
-        selection_area = float(pd.to_numeric(mstate["area_muni_km2"], errors="coerce").sum())
-    else:
-        selection_area = area_km2(selected_geometry)
+        with st.spinner("Buscando os dados GLM mais recentes..."):
+            snapshot = _load_snapshot()
+    except Exception as exc:
+        st.error("Não foi possível obter os dados GLM mais recentes.")
+        with st.expander("Detalhes técnicos"):
+            st.exception(exc)
+        return
 
-else:
-    st.subheader("🛰️ Desenhe a região personalizada")
-    st.info(
-        "Use o botão de polígono ou retângulo no mapa. A região desenhada será a máscara "
-        "dos cálculos e dos rankings."
-    )
-    previous = st.session_state.get("v4_custom_geometry")
-    draw_map = build_draw_map(previous)
-    from streamlit_folium import st_folium
-    draw_result = st_folium(
-        draw_map,
-        use_container_width=True,
-        height=520,
-        returned_objects=["last_active_drawing"],
-        key="v4_draw_map",
-    )
-    drawing = (draw_result or {}).get("last_active_drawing")
-    if drawing and drawing.get("geometry"):
-        try:
-            selected_geometry = shape(drawing["geometry"])
-            if not selected_geometry.is_valid:
-                selected_geometry = selected_geometry.buffer(0)
-            if not selected_geometry.is_empty:
-                st.session_state["v4_custom_geometry"] = selected_geometry
-        except Exception:
-            selected_geometry = previous
-    else:
-        selected_geometry = previous
+    counts = group_counts(snapshot.flashes)
 
-    if selected_geometry is None or selected_geometry.is_empty:
-        st.warning("Desenhe uma região no mapa para continuar.")
-        st.stop()
-    selection_label = "Região personalizada"
-    selection_area = area_km2(selected_geometry)
-    st.success(f"Região selecionada: {format_float(selection_area, 1)} km²")
-
-# -----------------------------------------------------------------------------
-# 2) PERÍODO E BASE TEMPORAL
-# -----------------------------------------------------------------------------
-st.sidebar.header("2. Período")
-time_basis = st.sidebar.selectbox(
-    "Base de horário",
-    ["Brasília (UTC-3)", "UTC"],
-    index=0,
-)
-utc_offset = -3 if time_basis.startswith("Brasília") else 0
-
-local_min = tmin + pd.Timedelta(hours=utc_offset)
-local_max = tmax + pd.Timedelta(hours=utc_offset)
-min_date = local_min.date()
-max_date = local_max.date()
-
-default_start = min_date
-if (max_date - min_date).days > 365 * 5:
-    default_start = date(max_date.year - 4, 1, 1)
-    if default_start < min_date:
-        default_start = min_date
-
-start_date = st.sidebar.date_input("Data inicial", value=default_start, min_value=min_date, max_value=max_date)
-end_date = st.sidebar.date_input("Data final", value=max_date, min_value=min_date, max_value=max_date)
-if end_date < start_date:
-    st.sidebar.error("A data final deve ser igual ou posterior à data inicial.")
-    st.stop()
-
-# Datas escolhidas são datas locais na base selecionada; converte para UTC.
-start_local_naive = pd.Timestamp(datetime.combine(start_date, time.min))
-end_local_naive = pd.Timestamp(datetime.combine(end_date, time.max))
-start_utc = (start_local_naive - pd.Timedelta(hours=utc_offset)).tz_localize("UTC")
-end_utc = (end_local_naive - pd.Timedelta(hours=utc_offset)).tz_localize("UTC")
-start_utc = max(start_utc, tmin)
-end_utc = min(end_utc, tmax)
-
-st.sidebar.caption(
-    f"Base disponível: {local_min.strftime('%d/%m/%Y %H:%M')} → "
-    f"{local_max.strftime('%d/%m/%Y %H:%M')} ({time_basis})"
-)
-
-st.sidebar.header("3. Executar")
-if st.sidebar.button("⚡ ANALISAR", type="primary", use_container_width=True):
-    st.session_state["v4_analysis_active"] = True
-if st.sidebar.button("Limpar análise", use_container_width=True):
-    st.session_state["v4_analysis_active"] = False
-
-if not st.session_state.get("v4_analysis_active", False):
-    st.markdown("### Área escolhida")
+    # -------------------------------------------------------------------------
+    # CARDS PRINCIPAIS — estilo Power BI
+    # -------------------------------------------------------------------------
     c1, c2, c3 = st.columns(3)
-    c1.metric("Seleção", selection_label)
-    c2.metric("Área", f"{format_float(selection_area, 1)} km²")
-    c3.metric("Fonte", "GLM-L2-LCFA")
-    st.info("Defina o período na barra lateral e clique em **ANALISAR**.")
-    st.stop()
+    with c1:
+        _card(
+            "Flashes Totais",
+            _fmt_int(len(snapshot.flashes)),
+            "Janela móvel de 30 minutos",
+        )
+    with c2:
+        _card(
+            "Satélite",
+            "GOES-19",
+            "Geostationary Lightning Mapper",
+        )
+    with c3:
+        _card(
+            "Último dado UTC",
+            snapshot.observation_end_utc.strftime("%d/%m/%Y %H:%M:%S UTC"),
+            "Horário do arquivo GLM mais recente disponível",
+        )
 
-# -----------------------------------------------------------------------------
-# 3) CONSULTA DA BASE PRIMÁRIA
-# -----------------------------------------------------------------------------
-with st.spinner("Consultando flashes GLM e calculando produtos..."):
-    if selection_type == "Município":
-        flashes = repo.load(start=start_utc, end=end_utc, code_muni=selected_code)
-    elif selection_type == "Estado":
-        flashes = repo.load(start=start_utc, end=end_utc, state=selected_state)
-    else:
-        bbox = selected_geometry.bounds
-        flashes = repo.load(start=start_utc, end=end_utc, bbox=bbox)
-        flashes = filter_by_geometry(flashes, selected_geometry)
-
-    products = calculate_analysis(
-        flashes,
-        start=start_utc,
-        end=end_utc,
-        selection_area_km2=selection_area,
-        utc_offset_hours=utc_offset,
+    st.markdown("<div style='height:10px'></div>", unsafe_allow_html=True)
+    st.caption(
+        "Janela disponível: "
+        f"{snapshot.window_start_utc.strftime('%d/%m/%Y %H:%M:%S')} → "
+        f"{snapshot.observation_end_utc.strftime('%d/%m/%Y %H:%M:%S')} UTC"
     )
 
-# -----------------------------------------------------------------------------
-# CABEÇALHO DA ANÁLISE
-# -----------------------------------------------------------------------------
-st.markdown(f"## {selection_label}")
-st.caption(
-    f"Período analisado: **{start_date.strftime('%d/%m/%Y')} → {end_date.strftime('%d/%m/%Y')}** • "
-    f"{time_basis} • fonte individual: `{repo.source_description()}`"
-)
-
-s = products.summary
-c1, c2, c3, c4, c5 = st.columns(5)
-c1.metric("Flashes", format_int(s["flash_count"]))
-c2.metric("Densidade", f"{format_float(s['flash_density_km2'], 3)} /km²")
-c3.metric("Dias com relâmpagos", format_int(s["lightning_days"]))
-c4.metric("Flashes/dia", format_float(s["flashes_per_day"], 2))
-c5.metric("Flashes/dia ativo", format_float(s["flashes_per_active_day"], 2))
-
-if products.monthly["year"].nunique() < 2:
-    st.warning(
-        "O período selecionado possui menos de 2 anos. Climatologia, anomalias e z-score são mostrados "
-        "para testar a estrutura, mas ainda não devem ser interpretados como climatologia robusta."
-    )
-
-# -----------------------------------------------------------------------------
-# ABAS DE RESULTADOS
-# -----------------------------------------------------------------------------
-tabs = st.tabs([
-    "🗺️ Mapa", "📊 Resumo", "📅 Temporal", "🌦️ Climatologia",
-    "⚡ Características", "🏆 Ranking / Município", "💾 Dados",
-])
-
-with tabs[0]:
-    st.subheader("Mapa de satélite")
-    map_mode = st.radio(
-        "Visualização dos flashes",
-        ["Flashes individuais", "Últimos 15 min (🔴🔵🟢)", "Mapa de calor"],
-        horizontal=True,
-    )
-    max_points = st.slider("Máximo de pontos enviados ao navegador", 1000, 30000, 12000, step=1000)
-    m = build_analysis_map(
-        products.flashes,
-        selected_geometry,
-        label=selection_label,
-        mode=map_mode,
-        max_points=max_points,
-    )
-    from streamlit_folium import st_folium
-    st_folium(m, use_container_width=True, height=690, returned_objects=[])
-    if getattr(m, "_glm_sampled", False):
+    # Transparência sobre eventual interrupção da fonte sem exibir a métrica de latência.
+    if snapshot.latency_minutes > 10:
         st.warning(
-            f"A análise usa todos os {format_int(len(products.flashes))} flashes, mas o mapa desenha "
-            f"somente uma amostra de {format_int(getattr(m, '_glm_plotted', max_points))} para proteger o navegador."
+            "⚠️ O último arquivo disponível está desatualizado em relação ao horário atual. "
+            "Confira o horário exibido em **Último dado UTC**."
         )
-    elif map_mode == "Últimos 15 min (🔴🔵🟢)":
-        st.caption("🔴 0–5 min • 🔵 5–10 min • 🟢 10–15 min em relação ao flash mais recente do período carregado.")
 
-with tabs[1]:
-    st.subheader("Resumo do período")
-    a, b, c, d = st.columns(4)
-    a.metric("Máximo diário", format_int(s["max_daily_flashes"]), str(s["max_daily_date"])[:10] if s["max_daily_date"] is not None else None)
-    b.metric("Máximo horário", format_int(s["max_hourly_flashes"]))
-    c.metric("Área analisada", f"{format_float(s['area_km2'], 1)} km²")
-    c2 = 100 * s["lightning_days"] / s["total_days"] if s["total_days"] else np.nan
-    d.metric("Dias ativos", f"{format_float(c2, 1)}%")
+    # -------------------------------------------------------------------------
+    # MAPA PRIMEIRO
+    # -------------------------------------------------------------------------
+    st.markdown('<div class="section-heading">Mapa interativo</div>', unsafe_allow_html=True)
 
-    if s["max_hourly_date"] is not None:
-        st.write(
-            f"**Recorde horário:** {format_int(s['max_hourly_flashes'])} flashes em "
-            f"{pd.Timestamp(s['max_hourly_date']).strftime('%d/%m/%Y')}, hora local {s['max_hourly_hour']:02d}:00–{(s['max_hourly_hour']+1)%24:02d}:00."
+    if snapshot.flashes.empty:
+        st.warning(
+            "Nenhum flash com quality_flag=0 foi encontrado no recorte do Brasil "
+            "durante a janela disponível."
         )
-    st.markdown("#### Frequência diária")
-    st.write(
-        f"Média considerando **todos os dias**: **{format_float(s['flashes_per_day'], 2)} flashes/dia**.  \n"
-        f"Média considerando somente **dias com relâmpagos**: **{format_float(s['flashes_per_active_day'], 2)} flashes/dia ativo**."
+
+    mapa = build_live_map(snapshot.flashes)
+    st_folium(
+        mapa,
+        use_container_width=True,
+        height=730,
+        returned_objects=[],
+        key=f"lume_glm_live_{snapshot.observation_end_utc:%Y%m%d%H%M}",
     )
 
-with tabs[2]:
-    st.subheader("Séries diária, mensal e anual")
-    gran = st.radio("Escala", ["Diária", "Mensal", "Anual"], horizontal=True)
-    if gran == "Diária":
-        table = products.daily.copy(); x = "date"; title = "Flashes por dia"
-    elif gran == "Mensal":
-        table = products.monthly.copy(); x = "period_label"; title = "Flashes por mês"
-    else:
-        table = products.annual.copy(); x = "year"; title = "Flashes por ano"
-    fig = px.bar(table, x=x, y="flash_count", title=title, labels={"flash_count": "Flashes"})
-    st.plotly_chart(fig, use_container_width=True)
-    st.dataframe(table, use_container_width=True, hide_index=True)
+    # -------------------------------------------------------------------------
+    # RESULTADOS POR FAIXA ABAIXO DO MAPA
+    # -------------------------------------------------------------------------
+    st.markdown('<div class="section-heading">Atividade por faixa temporal</div>', unsafe_allow_html=True)
+    cols = st.columns(4)
+    for col, (label, _, _, color) in zip(cols, AGE_GROUPS):
+        with col:
+            _time_card(label, counts[label], color)
 
-with tabs[3]:
-    st.subheader("Média mensal climatológica")
-    clim = products.monthly_climatology.copy()
-    fig = px.bar(
-        clim, x="month_name", y="flash_count_mean",
-        category_orders={"month_name": list(MONTH_NAMES.values())},
-        labels={"month_name": "Mês", "flash_count_mean": "Média mensal de flashes"},
+    st.caption(
+        "As faixas de tempo são calculadas a partir do horário do dado GLM mais recente disponível. "
+        "Os pontos representam centroides dos flashes identificados no produto GLM-L2-LCFA."
     )
-    st.plotly_chart(fig, use_container_width=True)
-    st.dataframe(clim, use_container_width=True, hide_index=True)
 
-    st.subheader("Anomalias mensais")
-    anom_mode = st.radio("Métrica de anomalia", ["Absoluta", "Percentual", "Z-score"], horizontal=True)
-    col = {"Absoluta": "flash_count_anom", "Percentual": "flash_count_anom_pct", "Z-score": "flash_count_z"}[anom_mode]
-    if col in products.monthly_anomalies:
-        fig = px.bar(products.monthly_anomalies, x="period_label", y=col, labels={col: anom_mode, "period_label": "Mês/Ano"})
-        st.plotly_chart(fig, use_container_width=True)
 
-    st.subheader("Dias com relâmpagos e sazonalidade")
-    c1, c2 = st.columns(2)
-    with c1:
-        fig = px.bar(products.seasonality_month, x="month_name", y="mean_lightning_days",
-                     category_orders={"month_name": list(MONTH_NAMES.values())},
-                     labels={"month_name": "Mês", "mean_lightning_days": "Média de dias com relâmpagos"})
-        st.plotly_chart(fig, use_container_width=True)
-    with c2:
-        fig = px.bar(products.seasonality_season, x="season", y="fraction_pct",
-                     labels={"season": "Estação", "fraction_pct": "% dos flashes"})
-        st.plotly_chart(fig, use_container_width=True)
+with tab_live:
+    _live_panel()
 
-with tabs[4]:
-    st.subheader("Duração, energia e área dos flashes")
-    metric_options = {
-        "Duração (ms)": "duration_ms",
-        "Energia (J)": "energy_j",
-        "Área do flash (km²)": "area_km2",
-    }
-    label_metric = st.selectbox("Característica", list(metric_options))
-    metric = metric_options[label_metric]
-    fs = products.feature_summary[metric]
-    cols = st.columns(7)
-    for box, key in zip(cols, ["mean", "median", "std", "p90", "p95", "p99", "max"]):
-        box.metric(key.upper(), format_float(fs.get(key), 3))
-    values = pd.to_numeric(products.flashes.get(metric, pd.Series(dtype=float)), errors="coerce").dropna()
-    if not values.empty:
-        fig = px.histogram(values.to_frame(metric), x=metric, nbins=50, labels={metric: label_metric})
-        st.plotly_chart(fig, use_container_width=True)
 
-    st.subheader("Ciclo diurno/noturno")
-    c1, c2 = st.columns([2, 1])
-    with c1:
-        fig = px.bar(products.diurnal, x="hour", y="flash_count", labels={"hour": f"Hora ({time_basis})", "flash_count": "Flashes"})
-        st.plotly_chart(fig, use_container_width=True)
-    with c2:
-        fig = px.pie(products.day_night, names="period", values="flash_count", hole=.45)
-        st.plotly_chart(fig, use_container_width=True)
-        st.caption("V4: diurno = 06:00–17:59; noturno = 18:00–05:59 na base de horário selecionada.")
-
-with tabs[5]:
-    if selection_type == "Município":
-        st.subheader("Perfil mensal do município")
-        mp = products.municipality_months.copy()
-        valid = mp[mp["flash_count_mean"].notna()]
-        if not valid.empty:
-            imax = valid["flash_count_mean"].idxmax(); imin = valid["flash_count_mean"].idxmin()
-            rmax = valid.loc[imax]; rmin = valid.loc[imin]
-            c1, c2 = st.columns(2)
-            c1.metric("Mês climatologicamente mais ativo", rmax["month_name"], f"média {format_float(rmax['flash_count_mean'], 1)} flashes")
-            c2.metric("Mês climatologicamente menos ativo", rmin["month_name"], f"média {format_float(rmin['flash_count_mean'], 1)} flashes")
-        show = mp[[
-            "month", "month_name", "total_flashes", "flash_count_mean", "flash_count_median",
-            "flash_count_min", "flash_count_max", "climatological_fraction_pct", "n_years",
-        ]].copy()
-        show = show.rename(columns={
-            "month": "mês_nº", "month_name": "mês", "total_flashes": "flashes_total",
-            "flash_count_mean": "média_mensal", "flash_count_median": "mediana_mensal",
-            "flash_count_min": "mínimo_mensal", "flash_count_max": "máximo_mensal",
-            "climatological_fraction_pct": "%_climatológico", "n_years": "anos",
-        })
-        st.dataframe(show, use_container_width=True, hide_index=True)
-    elif selection_type == "Estado":
-        st.subheader(f"Ranking municipal — {selected_state}")
-        st.dataframe(products.ranking_municipalities, use_container_width=True, hide_index=True)
-        if not products.ranking_municipalities.empty:
-            fig = px.bar(products.ranking_municipalities.head(20), x="name_muni", y="flash_count", hover_data=["abbrev_state", "lightning_days"])
-            st.plotly_chart(fig, use_container_width=True)
-    else:
-        st.subheader("Ranking estadual dentro da região desenhada")
-        st.dataframe(products.ranking_states, use_container_width=True, hide_index=True)
-        st.subheader("Ranking municipal dentro da região desenhada")
-        st.caption("São contados apenas os flashes que caíram dentro do polígono desenhado, e não o total inteiro dos municípios interceptados.")
-        st.dataframe(products.ranking_municipalities, use_container_width=True, hide_index=True)
-
-with tabs[6]:
-    st.subheader("Downloads da análise")
-    exports = {
-        "diario.csv": products.daily,
-        "mensal.csv": products.monthly,
-        "anual.csv": products.annual,
-        "climatologia_mensal.csv": products.monthly_climatology,
-        "anomalias_mensais.csv": products.monthly_anomalies,
-        "ciclo_diurno.csv": products.diurnal,
-        "sazonalidade_mensal.csv": products.seasonality_month,
-        "ranking_estadual.csv": products.ranking_states,
-        "ranking_municipal.csv": products.ranking_municipalities,
-    }
-    for filename, df in exports.items():
-        if df is None or df.empty:
-            continue
-        st.download_button(
-            f"Baixar {filename}",
-            data=df.to_csv(index=False).encode("utf-8"),
-            file_name=filename,
-            mime="text/csv",
-            key=f"download_{filename}",
-        )
-    if len(products.flashes) <= 200_000:
-        st.download_button(
-            "Baixar flashes individuais da seleção",
-            data=products.flashes.to_csv(index=False).encode("utf-8"),
-            file_name="flashes_selecao.csv",
-            mime="text/csv",
-        )
-    else:
-        st.warning("A seleção possui mais de 200 mil flashes; o download individual pelo navegador foi desabilitado para proteger o Streamlit.")
-
-with st.expander("Metodologia resumida desta análise"):
+# =============================================================================
+# ABA 2 — CLIMATOLOGIA
+# =============================================================================
+with tab_clim:
     st.markdown(
         """
-- **Unidade:** flash GLM.
-- **Município:** centroide do flash associado ao polígono municipal.
-- **Estado:** todos os flashes associados a municípios da UF selecionada.
-- **Região personalizada:** somente flashes cujo ponto cai dentro do polígono/retângulo desenhado.
-- **Dias com relâmpagos:** dias com pelo menos um flash.
-- **Frequência diária:** calculada para todos os dias e, separadamente, somente para dias ativos.
-- **Climatologia mensal:** média entre ocorrências de cada mês no intervalo escolhido, incluindo meses sem flashes como zero.
-- **Anomalia:** valor mensal menos climatologia do mesmo mês; também percentual e z-score quando há variabilidade suficiente.
-- **Diurno/noturno V4:** classificação horária fixa 06–18 / 18–06 na base de horário selecionada.
-        """
+        <div class="coming-soon">
+            <h3>🌦️ Climatologia — Em breve</h3>
+            <p>
+                Esta área será habilitada quando a base histórica processada do GLM estiver disponível.
+                O módulo será preparado para climatologias mensais e anuais, com mapas interativos e
+                produtos estáticos para município, estado e Brasil.
+            </p>
+        </div>
+        """,
+        unsafe_allow_html=True,
     )
+
+    st.markdown("#### Produtos planejados")
+    p1, p2, p3 = st.columns(3)
+    with p1:
+        _card("Climatologia mensal", "Em breve", "Médias por mês")
+    with p2:
+        _card("Climatologia anual", "Em breve", "Síntese por ano")
+    with p3:
+        _card("Mapas", "Em breve", "Interativos e estáticos")
+
+
+# =============================================================================
+# ABA 3 — SÉRIES TEMPORAIS
+# =============================================================================
+with tab_series:
+    st.markdown(
+        """
+        <div class="coming-soon">
+            <h3>📈 Séries temporais — Em breve</h3>
+            <p>
+                O módulo utilizará a base histórica processada para gerar séries mensais e anuais
+                de flashes, com seleção espacial por estado, município ou Brasil e visualização
+                em gráficos interativos.
+            </p>
+        </div>
+        """,
+        unsafe_allow_html=True,
+    )
+
+    st.markdown("#### Estrutura planejada")
+    p1, p2, p3 = st.columns(3)
+    with p1:
+        _card("Estado", "Em breve", "Séries mensais e anuais")
+    with p2:
+        _card("Município", "Em breve", "Séries mensais e anuais")
+    with p3:
+        _card("Brasil", "Em breve", "Séries mensais e anuais")
