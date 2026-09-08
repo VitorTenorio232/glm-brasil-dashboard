@@ -1,1 +1,0 @@
-"""Núcleo do Dashboard GLM."""

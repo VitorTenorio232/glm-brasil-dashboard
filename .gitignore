@@ -13,3 +13,88 @@ data/processed/*.csv
 # Preserve a demo pequena
 !data/demo/**
 _backup_antes_lume_*/
+# ============================================================
+# Python
+venv/
+env/
+*$py.class
+.mypy_cache/
+.ruff_cache/
+.coverage
+htmlcov/
+
+# Jupyter
+.ipynb_checkpoints/
+# VS Code / IDEs
+.vscode/
+.idea/
+# Sistema operacional
+Thumbs.db
+*~
+# Streamlit / credenciais
+# Mantém arquivos de exemplo
+!.streamlit/secrets.toml.example
+!.streamlit/config.toml
+# Variáveis de ambiente / segredos
+.env.*
+!.env.example
+*.pem
+*.key
+credentials.json
+service-account*.json
+# DADOS GLM
+# Nunca versionar os dados brutos/processados
+data/raw/
+data/processed/
+data/flashes/
+# Malhas geográficas geradas
+data/municipalities/
+# Grandes formatos científicos/geoespaciais
+*.nc
+*.nc4
+*.h5
+*.hdf5
+*.grib
+*.grb
+*.grib2
+*.parquet
+*.feather
+*.gpkg
+*.shp
+*.shx
+*.dbf
+*.prj
+*.cpg
+*.qmd
+# GeoJSON pode ficar gigantesco
+*.geojson
+# DuckDB / bancos locais
+*.duckdb
+*.db
+*.sqlite
+*.sqlite3
+# Logs e temporários
+*.log
+logs/
+tmp/
+temp/
+# Builds / arquivos compactados gerados
+dist/
+build/
+*.egg-info/
+# ARQUIVOS NECESSÁRIOS
+!data/processed/
+data/processed/*
+!data/processed/flashes_enriched.parquet
+!data/municipalities/
+data/municipalities/*
+!data/municipalities/municipios_brasil_web.geojson
+_backup_flash_view_*/
+GLM_Process/
+_backup_hf_private_*/
+_backup_daily_*/
+_backup_mapa_*/
+# Flash View - dados e credenciais
+*.pyc
+_backup_*/
+*.part
