@@ -98,3 +98,6 @@ _backup_mapa_*/
 *.pyc
 _backup_*/
 *.part
+
+# Dados NetCDF antigos de demonstração
+data/demo/raw/
