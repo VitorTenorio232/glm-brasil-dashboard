@@ -14,3 +14,4 @@ pytz
 h5py>=3.11
 matplotlib>=3.9
 huggingface_hub>=0.34
+plotly>=6.2
