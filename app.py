@@ -333,10 +333,26 @@ def _states_geojson() -> dict | None:
 
 @st.cache_resource(show_spinner=False)
 def _country_geometry_safe():
+    # Sem geometria administrativa, o raster do Brasil não deve ser mostrado
+    # como um retângulo. Primeiro tenta read_country; depois, a união das UFs.
     try:
         return load_country(2022)
     except Exception:
-        return None
+        try:
+            states = load_states(2022)
+            geom = (
+                states.geometry.union_all()
+                if hasattr(states.geometry, "union_all")
+                else states.geometry.unary_union
+            )
+            if geom is None or geom.is_empty:
+                raise RuntimeError("A geometria administrativa do Brasil ficou vazia.")
+            return geom
+        except Exception as exc:
+            raise RuntimeError(
+                "Não foi possível carregar a geometria administrativa do Brasil. "
+                "Verifique se geobr, geopandas e shapely estão instalados."
+            ) from exc
 
 @st.cache_data(ttl=3600, show_spinner=False)
 def _series_cached(
