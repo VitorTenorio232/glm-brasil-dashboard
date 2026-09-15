@@ -1,9 +1,12 @@
 from __future__ import annotations
 
 import html
+import io
 import json
 import os
+import re
 from pathlib import Path
+from zoneinfo import ZoneInfo
 
 import numpy as np
 import pandas as pd
@@ -30,6 +33,7 @@ from src.historical_glm import (
 
 
 APP_DIR = Path(__file__).resolve().parent
+LOCAL_TIMEZONE = ZoneInfo("America/Sao_Paulo")
 
 
 # =============================================================================
@@ -168,6 +172,54 @@ st.markdown(
 # =============================================================================
 def _fmt_int(value: int | float) -> str:
     return f"{int(value):,}".replace(",", ".")
+
+
+def _local_time(dt):
+    """Converte um datetime UTC para o horário local de Brasília/São Paulo."""
+    if dt is None:
+        return None
+    return dt.astimezone(LOCAL_TIMEZONE)
+
+
+def _safe_filename(text: str) -> str:
+    text = re.sub(r"[^0-9A-Za-zÀ-ÿ_-]+", "_", str(text).strip())
+    return re.sub(r"_+", "_", text).strip("_") or "flash_view"
+
+
+def _series_figure_png(
+    data: pd.DataFrame,
+    *,
+    scale: str,
+    variable: str,
+    location_label: str,
+) -> bytes:
+    """Gera uma versão PNG da série exibida no painel, sem depender de Kaleido."""
+    import matplotlib.pyplot as plt
+
+    fig, ax = plt.subplots(figsize=(12, 6), dpi=160)
+    values = pd.to_numeric(data["value"], errors="coerce").to_numpy(dtype=float)
+
+    if scale in {"daily", "monthly"}:
+        x = pd.to_datetime(data["date"])
+        ax.plot(x, values, marker="o", linewidth=1.6, markersize=3.8)
+        fig.autofmt_xdate()
+    else:
+        x = data["year"].astype(int).to_numpy()
+        ax.plot(x, values, marker="o", linewidth=1.8, markersize=5)
+        ax.set_xticks(x)
+
+    ax.set_title(f"{VARIABLES[variable]['label']} — {location_label}")
+    ax.set_xlabel("Período")
+    ax.set_ylabel(f"{VARIABLES[variable]['label']} ({VARIABLES[variable]['unit']})")
+    ax.grid(True, alpha=0.25)
+    if variable == "flash_count":
+        ax.set_ylim(bottom=0)
+
+    fig.tight_layout()
+    buffer = io.BytesIO()
+    fig.savefig(buffer, format="png", dpi=200, bbox_inches="tight")
+    plt.close(fig)
+    return buffer.getvalue()
 
 
 def _card(label: str, value: str, small: str = "") -> None:
@@ -367,36 +419,39 @@ def _live_panel():
 
     counts = group_counts(snapshot.flashes)
 
+    window_start_local = _local_time(snapshot.window_start_utc)
+    observation_end_local = _local_time(snapshot.observation_end_utc)
+
     c1, c2, c3 = st.columns(3)
     with c1:
-        _card("Flashes Totais", _fmt_int(len(snapshot.flashes)), "Janela móvel de 30 minutos")
+        _card("Flashes", _fmt_int(len(snapshot.flashes)), "Intervalo de 30 minutos")
     with c2:
         _card("Satélite", "GOES-19", "Geostationary Lightning Mapper")
     with c3:
         _card(
-            "Último dado UTC",
-            snapshot.observation_end_utc.strftime("%d/%m/%Y %H:%M:%S UTC"),
-            "Horário do arquivo GLM mais recente disponível",
+            "Última atualização",
+            observation_end_local.strftime("%d/%m/%Y %H:%M:%S"),
+            "Horário local de Brasília",
         )
 
     st.markdown("<div style='height:10px'></div>", unsafe_allow_html=True)
     st.caption(
-        "Janela disponível: "
-        f"{snapshot.window_start_utc.strftime('%d/%m/%Y %H:%M:%S')} → "
-        f"{snapshot.observation_end_utc.strftime('%d/%m/%Y %H:%M:%S')} UTC"
+        "Intervalo disponível (horário local): "
+        f"{window_start_local.strftime('%d/%m/%Y %H:%M:%S')} → "
+        f"{observation_end_local.strftime('%d/%m/%Y %H:%M:%S')}"
     )
 
     if snapshot.latency_minutes > 10:
         st.warning(
             "⚠️ O último arquivo disponível está desatualizado em relação ao horário atual. "
-            "Confira o horário exibido em **Último dado UTC**."
+            "Confira o horário exibido em **Última atualização**."
         )
 
     st.markdown('<div class="section-heading">Mapa interativo</div>', unsafe_allow_html=True)
     if snapshot.flashes.empty:
         st.warning(
             "Nenhum flash com quality_flag=0 foi encontrado no recorte do Brasil "
-            "durante a janela disponível."
+            "durante o intervalor disponível."
         )
 
     mapa = build_live_map(snapshot.flashes)
@@ -443,20 +498,10 @@ if historical_config.mode != "none":
 
 
 def _historical_unavailable():
-    st.warning("A base histórica do Flash View ainda não foi localizada neste ambiente.")
-    st.markdown(
-        """
-        <div class="info-panel">
-        <strong>Execução local:</strong> o sistema procura automaticamente por
-        <code>../GLM_Process/OUTPUT</code>. Você também pode definir
-        <code>FLASH_VIEW_DATA_ROOT</code>.<br><br>
-        <strong>Site online (Dataset privado):</strong> configure os Secrets
-        <code>FLASH_VIEW_HF_REPO</code> e <code>HF_TOKEN</code> no Streamlit Community Cloud.
-        O token não deve ser salvo no GitHub. Se os diretórios estiverem dentro de uma pasta
-        no Dataset, configure também <code>FLASH_VIEW_HF_PREFIX</code>.
-        </div>
-        """,
-        unsafe_allow_html=True,
+    st.error("A base histórica está temporariamente indisponível.")
+    st.caption(
+        "O monitoramento quase em tempo real continua disponível. "
+        "Tente novamente em instantes; se o problema persistir, consulte os detalhes técnicos."
     )
     if historical_error is not None:
         with st.expander("Detalhes técnicos"):
@@ -474,9 +519,16 @@ if historical_repo is not None and historical_config.mode == "huggingface":
 with tab_clim:
     st.markdown('<div class="section-heading">Climatologia e mapas históricos</div>', unsafe_allow_html=True)
     st.caption(
-        "Visualização dos produtos GLM processados em grade. Para propriedades médias dos flashes "
-        "(energia, área e duração), as climatologias são ponderadas pelo número de flashes."
+        "Visualização dos produtos GLM processados em grade. Número de flashes é tratado como contagem; "
+        "energia, área e duração são médias ponderadas pelo número de flashes."
     )
+    with st.expander("ℹ️ Como os cálculos são feitos"):
+        st.markdown(
+            "**Agregação espacial:** o número de flashes é a **soma** das células incluídas no recorte. "
+            "Energia, área e duração são calculadas por **média ponderada por `flash_count`**.\n\n"
+            "**Climatologia:** para número de flashes, calcula-se a **média climatológica das contagens** "
+            "dos períodos selecionados; para energia, área e duração, mantém-se a média ponderada pelos flashes."
+        )
     st.info("📅 Base histórica processada disponível até **31/12/2022**.")
 
     if historical_repo is None:
@@ -1003,13 +1055,19 @@ with tab_series:
                     end_ts.strftime("%Y-%m-%d"),
                 )
 
-                if st.button(
-                    "📈 Calcular série",
-                    type="primary",
-                    width="stretch",
-                    disabled=not period_ok,
-                    key="calculate_historical_series",
-                ):
+                st.markdown("---")
+                st.markdown("**Ação da série temporal**")
+                calc_col, calc_space = st.columns([1.35, 4.65])
+                with calc_col:
+                    calculate_series = st.button(
+                        "📈 Calcular série",
+                        type="primary",
+                        width="stretch",
+                        disabled=not period_ok,
+                        key="calculate_historical_series",
+                    )
+
+                if calculate_series:
                     with st.spinner("Calculando somente o período solicitado..."):
                         if spatial_level == "Brasil":
                             geometry = load_country(2022)
@@ -1104,20 +1162,36 @@ with tab_series:
                             fig.update_yaxes(rangemode="tozero")
                         st.plotly_chart(fig, width="stretch", config={"displaylogo": False})
 
-                        export_cols = [c for c in ["date", "year", "month", "day", "value"] if c in valid.columns]
-                        csv = valid[export_cols].to_csv(index=False).encode("utf-8")
-                        st.download_button(
-                            "⬇️ Baixar série em CSV",
-                            data=csv,
-                            file_name=f"flash_view_{spatial_level.lower()}_{series_scale}_{series_variable}.csv",
-                            mime="text/csv",
-                            width="content",
+                        st.markdown("---")
+                        st.markdown("**Download da figura**")
+                        png_bytes = _series_figure_png(
+                            valid,
+                            scale=series_scale,
+                            variable=series_variable,
+                            location_label=location_label,
                         )
+                        download_col, download_space = st.columns([1.55, 4.45])
+                        with download_col:
+                            st.download_button(
+                                "⬇️ Baixar figura (PNG)",
+                                data=png_bytes,
+                                file_name=(
+                                    f"flash_view_{_safe_filename(location_label)}_"
+                                    f"{series_scale}_{series_variable}.png"
+                                ),
+                                mime="image/png",
+                                width="stretch",
+                            )
 
-                        if series_variable != "flash_count":
+                        if series_variable == "flash_count":
                             st.caption(
-                                "As médias espaciais de energia, área e duração são ponderadas por `flash_count`. "
-                                "Para `flash_count`, a série representa a soma das células incluídas na área selecionada."
+                                "Para número de flashes, cada ponto da série é a **soma** de `flash_count` "
+                                "das células incluídas na área selecionada."
+                            )
+                        else:
+                            st.caption(
+                                "Energia, área e duração são calculadas por **média ponderada por `flash_count`** "
+                                "nas células incluídas na área selecionada."
                             )
                 else:
                     st.caption("Defina os parâmetros acima e clique em **Calcular série** para iniciar o processamento.")
