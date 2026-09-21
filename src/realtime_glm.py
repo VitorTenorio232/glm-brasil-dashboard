@@ -217,10 +217,10 @@ def _safe_popup(row: pd.Series) -> str:
     return "<br>".join(x for x in parts if x)
 
 
-def build_live_map(df: pd.DataFrame):
-    """Mapa satélite leve, com quatro faixas temporais e clustering no navegador."""
+def build_live_map(df: pd.DataFrame, *, view_geometry=None, enable_area_draw: bool = False):
+    """Mapa satélite leve, com seleção opcional de área por retângulo."""
     import folium
-    from folium.plugins import FastMarkerCluster, Fullscreen
+    from folium.plugins import Draw, FastMarkerCluster, Fullscreen
 
     m = folium.Map(
         location=[-14.2, -51.9],
@@ -285,8 +285,45 @@ def build_live_map(df: pd.DataFrame):
             options={"disableClusteringAtZoom": 7, "maxClusterRadius": 45},
         ).add_to(m)
 
-    lon_min, lat_min, lon_max, lat_max = BRAZIL_VIEW_BBOX
-    m.fit_bounds([[lat_min, lon_min], [lat_max, lon_max]], padding=(12, 12))
+    if view_geometry is not None:
+        try:
+            from shapely.geometry import mapping
+            minx, miny, maxx, maxy = view_geometry.bounds
+            dx = max(0.05, (maxx - minx) * 0.06)
+            dy = max(0.05, (maxy - miny) * 0.06)
+            folium.GeoJson(
+                mapping(view_geometry),
+                name="Área selecionada",
+                style_function=lambda _: {
+                    "color": "#ff7a18", "weight": 2.5,
+                    "fillColor": "#ff7a18", "fillOpacity": 0.06,
+                },
+                show=True,
+            ).add_to(m)
+            m.fit_bounds([[miny-dy, minx-dx], [maxy+dy, maxx+dx]], padding=(12, 12))
+        except Exception:
+            lon_min, lat_min, lon_max, lat_max = BRAZIL_VIEW_BBOX
+            m.fit_bounds([[lat_min, lon_min], [lat_max, lon_max]], padding=(12, 12))
+    else:
+        lon_min, lat_min, lon_max, lat_max = BRAZIL_VIEW_BBOX
+        m.fit_bounds([[lat_min, lon_min], [lat_max, lon_max]], padding=(12, 12))
+
+    if enable_area_draw:
+        Draw(
+            export=False,
+            position="topleft",
+            draw_options={
+                "polyline": False, "polygon": False, "circle": False,
+                "marker": False, "circlemarker": False,
+                "rectangle": {
+                    "shapeOptions": {
+                        "color": "#ff7a18", "weight": 2.5, "fillOpacity": 0.08
+                    }
+                },
+            },
+            edit_options={"edit": False, "remove": True},
+        ).add_to(m)
+
     Fullscreen(position="topleft").add_to(m)
     folium.LayerControl(collapsed=False).add_to(m)
 

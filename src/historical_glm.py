@@ -46,6 +46,30 @@ VARIABLES = {
     },
 }
 
+# Limites de visualização fixos para permitir comparação direta entre mapas.
+# Valores extremos acima do limite superior ficam saturados na cor máxima, mas
+# os dados originais continuam preservados nos downloads.
+FIXED_MAP_RANGES = {
+    "flash_count": {
+        "daily": (0.0, 50.0),
+        "monthly": (0.0, 400.0),
+        "yearly": (0.0, 2500.0),
+    },
+    "flash_energy": {"default": (0.0, 1.2e-11)},
+    "flash_area": {"default": (0.0, 4000.0)},
+    "flash_duration": {"default": (0.0, 1.2)},
+}
+
+
+def fixed_map_range(variable: str, scale: str) -> tuple[float, float]:
+    cfg = FIXED_MAP_RANGES.get(variable, {})
+    if scale in cfg:
+        return tuple(cfg[scale])
+    if "default" in cfg:
+        return tuple(cfg["default"])
+    raise KeyError(f"Escala fixa não configurada para {variable}/{scale}.")
+
+
 MONTH_NAMES_PT = {
     1: "Janeiro",
     2: "Fevereiro",
@@ -726,6 +750,34 @@ def _crop_to_geometry_bbox(lat, lon, data, geometry):
         ix = int(np.nanargmin(np.abs(np.asarray(lon) - cx)))
         return np.asarray(lat)[iy:iy+1], np.asarray(lon)[ix:ix+1], np.asarray(data)[iy:iy+1, ix:ix+1]
 
+def clip_field_to_geometry(
+    lat: np.ndarray,
+    lon: np.ndarray,
+    data: np.ndarray,
+    geometry=None,
+):
+    """Recorta ao bbox e mascara centros de células fora da geometria.
+
+    Retorna somente o produto necessário para visualização/download, reduzindo
+    memória em recortes estaduais, municipais e personalizados.
+    """
+    lat2, lon2, data2 = _crop_to_geometry_bbox(lat, lon, data, geometry)
+    data2 = np.asarray(data2, dtype=np.float64).copy()
+    if geometry is not None:
+        try:
+            from shapely import contains_xy, intersects_xy
+            xx, yy = np.meshgrid(lon2, lat2)
+            mask = contains_xy(geometry, xx, yy)
+            try:
+                mask |= intersects_xy(geometry.boundary, xx, yy)
+            except Exception:
+                pass
+            data2[~np.asarray(mask, dtype=bool)] = np.nan
+        except Exception:
+            pass
+    return np.asarray(lat2), np.asarray(lon2), data2
+
+
 def build_historical_map(
     lat: np.ndarray,
     lon: np.ndarray,
@@ -737,6 +789,7 @@ def build_historical_map(
     clip_geometry=None,
     boundary_name: str = "Limite selecionado",
     mask_to_geometry: bool = True,
+    display_range: tuple[float, float] | None = None,
 ):
     import folium
     from branca.colormap import LinearColormap
@@ -747,8 +800,9 @@ def build_historical_map(
     # processar a grade brasileira inteira quando o usuário seleciona estado ou município.
     lat, lon, data = _crop_to_geometry_bbox(lat, lon, data, clip_geometry)
 
-    # A escala de cores é calculada sobre a região já reduzida ao recorte escolhido.
-    vmin, vmax = _robust_range(data, variable)
+    # Por padrão ainda existe fallback automático, mas o Flash View público passa
+    # display_range fixo por variável/escala para permitir comparação entre mapas.
+    vmin, vmax = display_range if display_range is not None else _robust_range(data, variable)
 
     cmap = matplotlib.colormaps["turbo"]
     rgba = _rgba_clipped_to_country(
@@ -768,6 +822,16 @@ def build_historical_map(
     # meia célula que fazia o raster não coincidir perfeitamente com os limites.
     south, north = _axis_cell_edges(lat)
     west, east = _axis_cell_edges(lon)
+
+    # Leaflet desenha tiles em Web Mercator (EPSG:3857), enquanto a grade GLM
+    # é regular em latitude/longitude (EPSG:4326). Reprojetamos a imagem antes
+    # do ImageOverlay e endurecemos novamente o canal alfa para evitar que a
+    # interpolação da reprojeção crie uma faixa semitransparente fora do shape.
+    from folium.raster_layers import mercator_transform
+    rgba_mercator = mercator_transform(rgba, (south, north), origin="lower")
+    if rgba_mercator.shape[-1] == 4:
+        rgba_mercator[..., 3] = np.where(rgba_mercator[..., 3] >= 100, 200, 0)
+    rgba_mercator = np.clip(rgba_mercator, 0, 255).astype(np.uint8)
 
     m = folium.Map(
         location=[-14.2, -51.9],
@@ -797,9 +861,10 @@ def build_historical_map(
     ).add_to(m)
 
     folium.raster_layers.ImageOverlay(
-        image=rgba,
+        image=rgba_mercator,
         bounds=[[south, west], [north, east]],
         origin="lower",
+        pixelated=True,
         name=layer_name,
         opacity=1.0,
         interactive=False,
@@ -854,8 +919,8 @@ def build_historical_map(
     if clip_geometry is not None:
         try:
             minx, miny, maxx, maxy = clip_geometry.bounds
-            pad_x = max(0.4, (maxx - minx) * 0.02)
-            pad_y = max(0.4, (maxy - miny) * 0.02)
+            pad_x = max(0.05, (maxx - minx) * 0.06)
+            pad_y = max(0.05, (maxy - miny) * 0.06)
             m.fit_bounds(
                 [[miny - pad_y, minx - pad_x], [maxy + pad_y, maxx + pad_x]],
                 padding=(10, 10),

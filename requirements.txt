@@ -20,3 +20,5 @@ geopandas>=1.0
 shapely>=2.0
 pyogrio>=0.10
 pyproj>=3.7
+scipy>=1.14
+pyarrow>=18
