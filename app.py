@@ -52,6 +52,15 @@ from src.view_exports import (
 )
 
 
+from src.cartographic_export import (
+    BoardMeta, render_raster_board, render_flash_board, render_image_board,
+    jpeg_from_png, safe_name, BasemapUnavailable,
+)
+
+from src.export_area import export_area_selector, ExportArea
+from src.cartographic_export import BASEMAPS
+from src.cartographic_export import render_glm_board_gif  # V9.3
+
 APP_DIR = Path(__file__).resolve().parent
 LOCAL_TIMEZONE = ZoneInfo("America/Sao_Paulo")
 
@@ -211,36 +220,42 @@ st.markdown(
         margin: 0.55rem 0 0.9rem 0;
     }
     
-    /* Flash View | Sala de Operações — visual escuro inspirado em aplicações meteorológicas. */
-    .stApp {background:#080e17;color:#e7edf6;}
-    .block-container {max-width:1900px;padding:0.45rem 1.25rem 2rem;}
-    .fv-header {background:linear-gradient(95deg,#0c1826,#15283a);color:white;
-        border:1px solid #26384a;border-radius:12px;box-shadow:none;text-align:left;
-        padding:0.65rem 1.2rem;margin:0 0 0.45rem;}
-    .fv-title {font-size:1.6rem;color:white;text-align:left;letter-spacing:-0.02em;}
-    .fv-subtitle {font-size:0.82rem;margin-top:0.2rem;color:#a9c1d6;text-align:left;}
-    .metric-card,.time-card {background:#131f2e;border:1px solid #2c3b50;
-        box-shadow:none;color:#ecf4ff;min-height:90px;padding:11px 14px;}
-    .metric-card-label,.time-card-header {color:#b5c7dc;}
-    .metric-card-value,.time-card-value {color:#f1f6ff;font-size:1.4rem;}
-    .metric-card-small {color:#9eb1c6;}
-    .section-heading {color:#ecf5ff;text-align:left;margin-top:.65rem;font-size:1.12rem;}
-    .info-panel,.fv-action-panel {background:#132132;border-color:#2b4358;color:#d8e8f8;}
+    /* Flash View V9.1 | identidade CLARA e contraste legível. */
+    .stApp, [data-testid="stAppViewContainer"], [data-testid="stMain"] {
+        background: #ffffff !important; color: #172536 !important;
+    }
+    .block-container {max-width:1900px;padding:0.55rem 1.3rem 2rem;}
+    .fv-header {background:linear-gradient(120deg,#ffffff,#f1f7fa);color:#13283a;
+        border:1px solid #dbe6ec;border-radius:13px;box-shadow:0 4px 17px rgba(13,37,54,.055);
+        text-align:left;padding:0.75rem 1.2rem;margin:0 0 0.55rem;}
+    .fv-title {font-size:1.7rem;color:#102b40;text-align:left;letter-spacing:-0.02em;}
+    .fv-subtitle {font-size:0.85rem;margin-top:0.2rem;color:#475f72;text-align:left;}
+    .metric-card,.time-card {background:#fff;border:1px solid #dbe5ee;
+        box-shadow:0 3px 14px rgba(20,43,61,.06);min-height:96px;padding:12px 15px;}
+    .metric-card-label,.time-card-header {color:#43566c;}
+    .metric-card-value,.time-card-value {color:#102436;font-size:1.45rem;}
+    .metric-card-small {color:#536c80;}
+    .section-heading {color:#112c43;text-align:left;margin-top:.65rem;font-size:1.17rem;}
+    .info-panel,.fv-action-panel {background:#f6f9fb;border-color:#dbe7ed;color:#263e50;}
+    .info-panel strong {color:#132d42;}
+    .fv-ops-strip {display:flex;align-items:center;justify-content:space-between;flex-wrap:wrap;gap:9px;
+        background:#f7fafc;border:1px solid #dae5ea;color:#1d394f;padding:10px 14px;
+        border-radius:10px;margin-bottom:10px;font-size:12px;}
+    .fv-ops-pill {display:inline-block;background:#e8f5fa;color:#096685;border:1px solid #add9e7;
+        padding:4px 8px;border-radius:8px;font-weight:750;letter-spacing:.02em;}
+    .fv-ops-main {font-weight:800;font-size:13px;letter-spacing:.06em;color:#15364b;}
+    .fv-ops-muted {color:#586f80;}
+    .fv-timeline-title {background:#f6f9fc;border:1px solid #dbe6ee;border-radius:10px;
+        color:#243c51;padding:9px 12px;margin-top:8px;}
     button[data-baseweb="tab"] {border-radius:7px 7px 0 0;}
     div[data-baseweb="tab-list"] {justify-content:flex-start;gap:.20rem;}
-    button[data-baseweb="tab"] p {font-size:.89rem;}
-    [data-testid="stMetricValue"],[data-testid="stMetricLabel"] {color:#e8f2ff;}
-    .fv-ops-strip {display:flex;align-items:center;justify-content:space-between;flex-wrap:wrap;gap:9px;
-        background:#101c2b;border:1px solid #263b50;color:#d1e7f8;padding:10px 14px;
-        border-radius:10px;margin-bottom:10px;font-size:12px;}
-    .fv-ops-pill {display:inline-block;background:#173548;color:#7de5ef;border:1px solid #266579;
-        padding:4px 8px;border-radius:8px;font-weight:750;letter-spacing:.02em;}
-    .fv-ops-main {font-weight:800;font-size:13px;letter-spacing:.06em;color:#fff;}
-    .fv-ops-muted {color:#9fb9cd;}
-    .fv-timeline-title {background:#0e1a2b;border:1px solid #27415a;border-radius:10px;
-        color:#e4f0fc;padding:9px 12px;margin-top:8px;}
-    div[data-testid="stExpander"] {background:#0d1929;border-radius:9px;}
-    
+    button[data-baseweb="tab"] p {font-size:.91rem;color:#1c3448;}
+    div[data-testid="stExpander"] {background:#fafcfe;border-radius:10px;}
+    [data-testid="stMetricValue"], [data-testid="stMetricLabel"] {color:#173249;}
+    [data-testid="stWidgetLabel"] p, [data-testid="stMarkdownContainer"] p,
+    [data-testid="stMarkdownContainer"] li {color:#223b4d;}
+    [data-testid="stCaptionContainer"] p {color:#556f81;}
+    input,textarea {color:#1b2b3d !important;}
     </style>
     """,
     unsafe_allow_html=True,
@@ -886,34 +901,6 @@ def _live_panel():
     st.caption("Mapa MapLibre: centro e zoom são mantidos no navegador. "
                "Os controles da última hora operam sem executar novamente o Python.")
 
-    # ==================== Exportar PNG/JPEG/GIF ====================
-    ec1,ec2,ec3=st.columns([1.5,1.3,3])
-    with ec1:
-        if st.button("📷 Preparar PNG/JPEG", key="fv_live_prepare_images"):
-            png=render_flash_png(display_flashes,title="Flash View | Monitoramento GLM",
-                subtitle=(f"Observação até {snapshot.observation_end_utc:%d/%m/%Y %H:%M} UTC "
-                          f"• {len(display_flashes)} flashes"),
-                geometry=selected_geometry,
-                observation_end=snapshot.observation_end_utc)
-            st.session_state["fv_live_png_export"]=png
-    with ec2:
-        if st.button("🎞️ Preparar GIF (1 h)",key="fv_live_prepare_gif"):
-            with st.spinner("Gerando 12 quadros da última hora..."):
-                st.session_state["fv_live_gif_export"]=render_glm_gif(
-                    hour_flashes,snapshot.observation_end_utc,geometry=selected_geometry)
-    with ec3:
-        st.caption("Exportação científica em fundo cartográfico simples, "
-                   "sem copiar mosaicos de satélite de terceiros.")
-    if st.session_state.get("fv_live_png_export"):
-        im1,im2=st.columns(2)
-        im1.download_button("⬇️ PNG",st.session_state["fv_live_png_export"],
-                           file_name="flash_view_tempo_real.png",mime="image/png",key="fv_live_dl_png")
-        im2.download_button("⬇️ JPEG",to_jpeg(st.session_state["fv_live_png_export"]),
-                           file_name="flash_view_tempo_real.jpg",mime="image/jpeg",key="fv_live_dl_jpg")
-    if st.session_state.get("fv_live_gif_export"):
-        st.download_button("⬇️ GIF animado (última hora)",st.session_state["fv_live_gif_export"],
-                           file_name="flash_view_glm_1h.gif",mime="image/gif",key="fv_live_dl_gif")
-
     st.markdown('<div class="section-heading">Atividade por faixa temporal</div>', unsafe_allow_html=True)
     cols = st.columns(4)
     for col, (label, _, _, color) in zip(cols, AGE_GROUPS):
@@ -924,6 +911,73 @@ def _live_panel():
         "As faixas de tempo são calculadas a partir do horário do dado GLM mais recente disponível. "
         "Os pontos representam centroides dos flashes identificados no produto GLM-L2-LCFA."
     )
+
+    # Flash View V9.2 — exportação recolhida sob Atividade por faixa temporal
+    with st.expander("Exportação", expanded=False):
+        # ==================== Pranchas PNG/JPEG e GIF GLM ====================
+        st.caption("Escolha uma área exclusiva para a imagem, sem alterar o mapa em tempo real. "
+                   "O PNG/JPEG usa o snapshot GLM já carregado.")
+        live_area = export_area_selector(prefix="fv_live", applied_geom=selected_geometry,
+                                         applied_label="Área atual no mapa" if selected_geometry is not None else "América do Sul")
+        live_w = 1920  # resolução técnica fixa; controle não exibido
+        live_bg = st.selectbox("Fundo da imagem", list(BASEMAPS), index=list(BASEMAPS).index("satellite"),
+             format_func=lambda x: BASEMAPS[x]["title"], key="fv_live_export_bg")
+        live_key = (str(snapshot.observation_end_utc), live_area.signature if live_area else None,
+                    live_w, live_bg)
+        lc1, lc2 = st.columns(2)
+        with lc1:
+            if st.button("🗺️ Preparar PNG/JPEG", key="fv_live_prepare_board",disabled=live_area is None):
+                try:
+                    meta_live = BoardMeta(product="Flashes observados — GLM", region=live_area.label,
+                        period=f"Últimos 30 min até {snapshot.observation_end_utc:%d/%m/%Y %H:%M} UTC",
+                        reference_utc=snapshot.observation_end_utc,
+                        resolution="Posição geográfica dos flashes GLM", basemap=live_bg)
+                    with st.spinner("Compondo prancha e carregando mapa-base..."):
+                        png = render_flash_board(snapshot.flashes, meta=meta_live,
+                            geometry=live_area.geometry, observation_end=snapshot.observation_end_utc,
+                            width=live_w, overlay_geojson=st.session_state.get("fv_user_geojson"))
+                    st.session_state["fv_live_board"] = {
+                        "key":live_key,"png":png,"name":safe_name("tempo_real",live_area.label,
+                            snapshot.observation_end_utc.strftime("%Y%m%dT%H%MZ"))}
+                except Exception as e:
+                    st.error(f"Não foi possível gerar a imagem: {e}")
+        with lc2:
+            if st.button("🎞️ Preparar GIF (1 h)",key="fv_live_prepare_gif", disabled=live_area is None):
+                # Cada quadro tem fundo cartográfico + shapes + janela móvel de 30 min.
+                # Falha de tiles é informada; nunca baixar GIF sem o mapa-base.
+                try:
+                    gif_meta = BoardMeta(
+                        product="Evolução de flashes — GLM", region=live_area.label,
+                        period=f"Última hora até {snapshot.observation_end_utc:%d/%m/%Y %H:%M} UTC",
+                        reference_utc=snapshot.observation_end_utc,
+                        resolution="Flashes GLM • janelas móveis de 30 minutos", basemap=live_bg)
+                    with st.spinner("Montando GIF com satélite/mapa-base e limites geográficos..."):
+                        gif = render_glm_board_gif(
+                            snapshot.flashes, snapshot.observation_end_utc, meta=gif_meta,
+                            geometry=live_area.geometry,
+                            overlay_geojson=st.session_state.get("fv_user_geojson"))
+                    st.session_state["fv_live_gif_export"] = {"key": live_key, "gif": gif}
+                except Exception as exc:
+                    st.session_state.pop("fv_live_gif_export", None)
+                    st.error(f"Não foi possível gerar o GIF com o mapa-base: {exc}")
+        live_export = st.session_state.get("fv_live_board")
+        if live_export and live_export.get("key") == live_key:
+            dl1,dl2=st.columns(2)
+            dl1.download_button("⬇️ Baixar PNG",live_export["png"],
+                file_name=live_export["name"],mime="image/png",key="fv_live_dl_board_png",on_click="ignore")
+            dl2.download_button("⬇️ Baixar JPEG",jpeg_from_png(live_export["png"]),
+                file_name=live_export["name"].replace(".png",".jpg"),
+                mime="image/jpeg",key="fv_live_dl_board_jpg",on_click="ignore")
+        elif live_export:
+            st.info("Parâmetros de exportação alterados. Clique em Preparar PNG/JPEG para atualizar a imagem.")
+        gif_export = st.session_state.get("fv_live_gif_export")
+        if isinstance(gif_export, dict) and gif_export.get("key") == live_key:
+            st.download_button("⬇️ GIF animado (última hora)",gif_export["gif"],
+                file_name=safe_name("tempo_real_gif",live_area.label,
+                    snapshot.observation_end_utc.strftime("%Y%m%dT%H%MZ"),extension="gif"),
+                mime="image/gif",key="fv_live_dl_gif",on_click="ignore")
+        elif gif_export:
+            st.info("Área/fundo/hora do GIF alterados. Prepare a animação novamente.")
 
 
 if tab_live.open:
@@ -1267,6 +1321,11 @@ if tab_clim.open:
                             "lat": np.asarray(dl_lat, dtype=np.float32),
                             "lon": np.asarray(dl_lon, dtype=np.float32),
                             "field": np.asarray(dl_field, dtype=np.float32),
+                            # Produto calculado integralmente: permite exportar outras regiões
+                            # sem nova consulta ao HF nem mudar o mapa original.
+                            "export_source_lat": np.asarray(lat, dtype=np.float32),
+                            "export_source_lon": np.asarray(lon, dtype=np.float32),
+                            "export_source_field": np.asarray(field, dtype=np.float32),
                             "geometry_wkb_hex": clip_geometry.wkb.hex() if clip_geometry is not None else None,
                             "display_range": tuple(map(float, display_range)),
                         }
@@ -1320,34 +1379,73 @@ if tab_clim.open:
                             f"{VARIABLES[result['variable']]['label']} — {result['period_text']} — "
                             f"{result.get('location_label', 'Brasil')}"
                         )
-                        png_bytes = _field_png(
-                            result["lat"], result["lon"], result["field"],
-                            variable=result["variable"], title=figure_title,
-                            geometry=result_geometry, display_range=result["display_range"],
-                        )
+                        # Dados científicos e NetCDF originais preservados.
                         nc_bytes = _field_netcdf_bytes(
                             result["lat"], result["lon"], result["field"],
                             variable=result["variable"], title=figure_title,
                         )
-                        d1, d2, d3, dspace = st.columns([1.1, 1.1, 1.1, 2.7])
-                        with d1:
-                            st.download_button(
-                                "⬇️ Figura PNG", png_bytes,
-                                file_name=f"flash_view_{_safe_filename(result['location_label'])}_{result['scale']}_{result['variable']}.png",
-                                mime="image/png", width="stretch", key=f"map_png_{result['render_id']}",
-                            )
-                        with d3:
-                            st.download_button(
-                                "⬇️ Figura JPEG", to_jpeg(png_bytes),
-                                file_name=f"flash_view_{_safe_filename(result['location_label'])}_{result['scale']}_{result['variable']}.jpg",
-                                mime="image/jpeg", width="stretch",key=f"map_jpg_{result['render_id']}",
-                            )
-                        with d2:
-                            st.download_button(
-                                "⬇️ Dados NetCDF", nc_bytes,
-                                file_name=f"flash_view_{_safe_filename(result['location_label'])}_{result['scale']}_{result['variable']}.nc",
-                                mime="application/x-netcdf", width="stretch", key=f"map_nc_{result['render_id']}",
-                            )
+                        with st.expander("Exportação", expanded=False):
+                            export_area = export_area_selector(
+                                prefix=f"fv_hist_{result['render_id']}",
+                                applied_geom=result_geometry,
+                                applied_label=result.get("location_label", "Brasil"))
+                            export_width = 1920  # resolução técnica fixa
+                            export_background = st.selectbox("Fundo da imagem", list(BASEMAPS),
+                                index=list(BASEMAPS).index("satellite"),
+                                format_func=lambda s: BASEMAPS[s]["title"],
+                                key=f"fv_hist_board_bg_{result['render_id']}")
+                            st.caption("A seleção desta imagem não altera o mapa mostrado. "
+                                "Os dados são reaproveitados do campo original do período já processado; "
+                                "não há novas consultas ao Hugging Face.")
+                            full_field_available = "export_source_field" in result
+                            changing_area = (export_area is not None and
+                                export_area.signature != ExportArea(
+                                    result.get("location_label","Brasil"),result_geometry).signature)
+                            if changing_area and not full_field_available:
+                                st.warning("Este mapa foi criado antes da atualização V9.1. "
+                                           "Clique em Gerar mapa novamente para habilitar outras áreas de exportação.")
+                            hist_key = (result["render_id"], export_area.signature if export_area else None,
+                                        export_width,export_background)
+                            can_prepare = (export_area is not None and
+                                (full_field_available or not changing_area))
+                            if st.button("📷 Preparar PNG/JPEG",
+                                         key=f"fv_hist_prepare_{result['render_id']}",
+                                         disabled=not can_prepare):
+                                try:
+                                    metah = BoardMeta(product=VARIABLES[result["variable"]]["label"],
+                                        region=export_area.label,period=result["period_text"],
+                                        source="NOAA GLM / " + result["source_text"],
+                                        resolution="Grade GLM ~0,08° • " + VARIABLES[result["variable"]]["map_unit"],
+                                        basemap=export_background)
+                                    lat_data = result.get("export_source_lat",result["lat"])
+                                    lon_data = result.get("export_source_lon",result["lon"])
+                                    field_data = result.get("export_source_field",result["field"])
+                                    with st.spinner("Compondo prancha cartográfica..."):
+                                        p = render_raster_board(lat_data,lon_data,field_data,
+                                            meta=metah,variable=result["variable"],
+                                            fixed_range=result["display_range"],geometry=export_area.geometry,
+                                            width=export_width,unit=VARIABLES[result["variable"]]["map_unit"],
+                                            overlay_geojson=st.session_state.get("fv_user_geojson"))
+                                    st.session_state["fv_hist_board"] = {
+                                        "key":hist_key,"png":p,"name":safe_name(result["variable"],
+                                            export_area.label,result["period_text"])}
+                                except Exception as exc:
+                                    st.error(f"Falha na exportação cartográfica: {exc}")
+                            board=st.session_state.get("fv_hist_board")
+                            if board and board.get("key") == hist_key:
+                                d1,d2=st.columns(2)
+                                d1.download_button("⬇️ Baixar PNG",board["png"],
+                                    file_name=board["name"],mime="image/png",on_click="ignore",
+                                    key=f"fv_hist_p_{result['render_id']}")
+                                d2.download_button("⬇️ Baixar JPEG",jpeg_from_png(board["png"]),
+                                    file_name=board["name"].replace(".png",".jpg"),mime="image/jpeg",
+                                    on_click="ignore",key=f"fv_hist_j_{result['render_id']}")
+                            elif board:
+                                st.info("A área ou o fundo mudou; prepare a prancha novamente.")
+                        st.download_button("⬇️ Dados NetCDF",nc_bytes,
+                            file_name=safe_name(result["variable"],result.get("location_label","Brasil"),
+                                                 result["period_text"],extension="nc"),
+                            mime="application/x-netcdf",key=f"map_nc_{result['render_id']}")
 
                         if result["variable"] == "flash_count":
                             st.caption(
@@ -1616,12 +1714,13 @@ if tab_series.open:
 
                             st.markdown("---")
                             st.markdown("**Downloads da série**")
-                            png_bytes = _series_figure_png(
-                                valid,
-                                scale=series_scale,
-                                variable=series_variable,
-                                location_label=location_label,
-                            )
+                            png_bytes = render_image_board(
+                                _series_figure_png(valid, scale=series_scale,
+                                    variable=series_variable,location_label=location_label),
+                                meta=BoardMeta(product="Série temporal: "+VARIABLES[series_variable]["label"],
+                                    region=location_label,period=f"Série {series_scale}",
+                                    resolution="Produto histórico GLM",basemap="satellite"),
+                                chart_kind="Série temporal")
                             csv_bytes = _series_csv_bytes(valid)
                             d1, d2, d3, dspace = st.columns([1.35, 1.35, 1.35, 2.0])
                             with d1:
@@ -1836,8 +1935,15 @@ if tab_rank.open:
                             width="stretch",
                             hide_index=True,
                         )
-                        rank_png = render_ranking_png(display,
-                            title=f"Flash View | Top {len(display)} — {rank_metric_label}")
+                        rank_png = render_image_board(
+                            render_ranking_png(display,
+                                title=f"Flash View | Top {len(display)} — {rank_metric_label}"),
+                            meta=BoardMeta(product="Ranking — " + rank_metric_label,
+                                region=rank_uf if rank_uf else "Brasil",
+                                period=f"{rank_scale_label} • {rank_start} a {rank_end}",
+                                resolution="Estatísticas administrativas GLM"),
+                            chart_kind="Ranking administrativo",
+                            metric_text=f"{len(display)} localidades")
                         rk1,rk2,rk3=st.columns(3)
                         rk1.download_button("⬇️ Ranking PNG",rank_png,
                             file_name="flash_view_ranking.png",mime="image/png",key="fv_rank_png")

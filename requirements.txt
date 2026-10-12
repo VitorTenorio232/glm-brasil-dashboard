@@ -27,3 +27,4 @@ huggingface_hub>=0.28
 # Flash View — V6 Sala de Operações
 Pillow>=10,<13
 boto3>=1.35,<2
+contextily>=1.6,<2

@@ -310,22 +310,55 @@ def render_trend_tab(*, snapshot_loader=None):
                 st.rerun()
 
     # Downloads científicos da área selecionada; sem imagens de terceiros.
-    if snapshot is not None and point is not None:
+    if snapshot is not None:
         from src.view_exports import render_flash_png,to_jpeg
         from src.spatial_tools import circular_buffer_geometry
         # Buffer equidistante azimutal centrado no ponto, com raio em quilômetros.
-        circle = circular_buffer_geometry(lat,lon,radius)
-        if st.button("📷 Preparar imagem da Tendência",key="fv_trend_prepare_export"):
-            st.session_state["fv_trend_png_export"] = render_flash_png(inside,
-                title="Flash View | Tendência observada",
-                subtitle=f"Centro {lat:.4f}, {lon:.4f} • raio {radius} km • {len(inside)} flashes",
-                geometry=circle,observation_end=snapshot.observation_end_utc)
-        if st.session_state.get("fv_trend_png_export"):
-            di1,di2=st.columns(2)
-            di1.download_button("⬇️ Tendência PNG",st.session_state["fv_trend_png_export"],
-                file_name="flash_view_tendencia.png",mime="image/png",key="fv_trend_dl_png")
-            di2.download_button("⬇️ Tendência JPEG",to_jpeg(st.session_state["fv_trend_png_export"]),
-                file_name="flash_view_tendencia.jpg",mime="image/jpeg",key="fv_trend_dl_jpg")
+        circle = circular_buffer_geometry(lat,lon,radius) if point is not None else None
+        # A seleção de área para o DOWNLOAD não altera o ponto analisado na Tendência.
+        from src.export_area import export_area_selector
+        from src.cartographic_export import BoardMeta, render_flash_board, jpeg_from_png, BASEMAPS, safe_name
+        export_circle = circle if point is not None else None
+        with st.expander("Exportação",expanded=False):
+            trend_area = export_area_selector(prefix="fv_trend",
+                applied_geom=export_circle,
+                applied_label=(f"Círculo de {radius} km" if point is not None else "Nenhuma área selecionada"))
+            trend_width = 1920  # resolução técnica fixa
+            trend_bg = st.selectbox("Fundo da imagem",list(BASEMAPS),
+                index=list(BASEMAPS).index("satellite"),format_func=lambda s: BASEMAPS[s]["title"],key="fv_trend_export_bg")
+            if trend_area is not None and trend_area.kind=='aplicada' and export_circle is None:
+                trend_area = None
+                st.info("Selecione um ponto no mapa da Tendência ou escolha outro tipo de área para a imagem.")
+            trend_key = (str(snapshot.observation_end_utc),
+                         trend_area.signature if trend_area else None,trend_width,trend_bg)
+            if st.button("📷 Preparar PNG/JPEG da Tendência",key="fv_trend_prepare_export",
+                         disabled=trend_area is None):
+                try:
+                    board_meta = BoardMeta(product="Tendência observada — GLM",
+                        region=trend_area.label,
+                        period=f"Últimos 30 min até {snapshot.observation_end_utc:%d/%m/%Y %H:%M} UTC",
+                        reference_utc=snapshot.observation_end_utc,
+                        resolution="Posição dos flashes GLM",basemap=trend_bg)
+                    with st.spinner("Compondo prancha e mapa-base..."):
+                        png = render_flash_board(snapshot.flashes,meta=board_meta,
+                            geometry=trend_area.geometry,
+                            observation_end=snapshot.observation_end_utc,width=trend_width,
+                            overlay_geojson=st.session_state.get("fv_user_geojson"))
+                    st.session_state["fv_trend_png_export"]={
+                        "key":trend_key,"png":png,"name":safe_name("tendencia",trend_area.label,
+                                snapshot.observation_end_utc.strftime("%Y%m%dT%H%MZ"))}
+                except Exception as e:
+                    st.error(f"Falha ao exportar a Tendência: {e}")
+            tr_board=st.session_state.get("fv_trend_png_export")
+            if isinstance(tr_board,dict) and tr_board.get("key")==trend_key:
+                di1,di2=st.columns(2)
+                di1.download_button("⬇️ Tendência PNG",tr_board["png"],
+                    file_name=tr_board["name"],mime="image/png",key="fv_trend_dl_png")
+                di2.download_button("⬇️ Tendência JPEG",jpeg_from_png(tr_board["png"]),
+                    file_name=tr_board["name"].replace(".png",".jpg"),
+                    mime="image/jpeg",key="fv_trend_dl_jpg")
+            elif tr_board:
+                st.info("Parâmetros da prancha alterados. Prepare a imagem novamente.")
 
     st.markdown("### Atividade elétrica observada — GLM")
     if load_error is not None:
