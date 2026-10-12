@@ -11,6 +11,7 @@ import pandas as pd
 
 from .glm_aws import iter_hours, list_hour_keys, unsigned_s3_client
 from .glm_reader import read_glm_files
+from .alertas_flash import add_collapsible_glm_legend
 
 # Recorte operacional do mapa. Mantém o Brasil inteiro e uma pequena margem.
 # Ordem: lon_min, lat_min, lon_max, lat_max.
@@ -127,6 +128,16 @@ def classify_age_groups(df: pd.DataFrame, observation_end_utc: datetime) -> pd.D
         out.loc[mask, "age_group"] = label
         out.loc[mask, "age_color"] = color
 
+    # Para o loop de 1 hora, manter também 30–60 min; no mapa AO VIVO os
+    # grupos tradicionais 0–30 minutos continuam inalterados.
+    older = (out["age_minutes"] >= 30.0) & (out["age_minutes"] <= 60.01)
+    out.loc[older & out["age_group"].isna(), "age_group"] = "30–60 min"
+    out.loc[older & out["age_color"].isna(), "age_color"] = "#8894a8"
+    # Guardar até 90 min para que cada quadro da animação de 1 h
+    # tenha uma janela COMPLETA de 30 min (mais antigo: -85 a -55 min).
+    replay_old = (out["age_minutes"] > 60.01) & (out["age_minutes"] <= 90.01)
+    out.loc[replay_old & out["age_group"].isna(), "age_group"] = "60–90 min (replay)"
+    out.loc[replay_old & out["age_color"].isna(), "age_color"] = "#8894a8"
     out = out[out["age_group"].notna()].copy()
     return out.sort_values("time_start").reset_index(drop=True)
 
@@ -139,7 +150,7 @@ def fetch_live_snapshot(
     search_back_minutes: int = 120,
     max_workers: int = 8,
 ) -> LiveSnapshot:
-    """Obtém os 30 minutos mais recentes disponíveis do GLM GOES-East via NOAA/NODD AWS.
+    """Obtém uma janela móvel (até 60 min) de GLM GOES-East via NOAA/NODD AWS.
 
     A janela é ancorada no arquivo LCFA mais recente disponível, e não no relógio local.
     Assim o usuário também recebe uma métrica explícita de latência da fonte.
@@ -217,14 +228,15 @@ def _safe_popup(row: pd.Series) -> str:
     return "<br>".join(x for x in parts if x)
 
 
-def build_live_map(df: pd.DataFrame, *, view_geometry=None, enable_area_draw: bool = False):
+def build_live_map(df: pd.DataFrame, *, view_geometry=None, enable_area_draw: bool = False,
+                   center=None, zoom: int = 3, dynamic_layers: bool = False):
     """Mapa satélite leve, com seleção opcional de área por retângulo."""
     import folium
-    from folium.plugins import Draw, FastMarkerCluster, Fullscreen
+    from folium.plugins import Draw, FastMarkerCluster, Fullscreen, MeasureControl, MousePosition
 
     m = folium.Map(
-        location=[-14.2, -51.9],
-        zoom_start=4,
+        location=center or [-15.0, -60.0],
+        zoom_start=int(zoom),
         tiles=None,
         control_scale=True,
         prefer_canvas=True,
@@ -237,9 +249,11 @@ def build_live_map(df: pd.DataFrame, *, view_geometry=None, enable_area_draw: bo
         attr="Tiles © Esri",
         name="Satélite",
         overlay=False,
-        control=False,
+        control=True,
         max_zoom=19,
     ).add_to(m)
+    folium.TileLayer("CartoDB dark_matter", name="Mapa escuro", overlay=False,
+                     control=True,show=False).add_to(m)
     folium.TileLayer(
         tiles=(
             "https://services.arcgisonline.com/ArcGIS/rest/services/"
@@ -254,6 +268,52 @@ def build_live_map(df: pd.DataFrame, *, view_geometry=None, enable_area_draw: bo
         max_zoom=19,
     ).add_to(m)
 
+    if not dynamic_layers:
+        # Compatibilidade com chamadas antigas (mapa completo estático).
+        build_live_features(df, view_geometry=view_geometry).add_to(m)
+    else:
+        # Carrega as bibliotecas MarkerCluster na primeira montagem do mapa.
+        # Os dados reais chegarão pelo feature_group_to_add, sem remount.
+        FastMarkerCluster(data=[], control=False, show=False).add_to(m)
+
+    # Não aplicar fit_bounds aqui: preserva exatamente a posição e o zoom do usuário.
+
+    if enable_area_draw:
+        Draw(
+            export=False,
+            position="topleft",
+            draw_options={
+                "polyline": False, "polygon": False, "circle": False,
+                "marker": False, "circlemarker": False,
+                "rectangle": {
+                    "shapeOptions": {
+                        "color": "#ff7a18", "weight": 2.5, "fillOpacity": 0.08
+                    }
+                },
+            },
+            edit_options={"edit": False, "remove": True},
+        ).add_to(m)
+
+    Fullscreen(position="topright").add_to(m)
+    MeasureControl(position="topright",primary_length_unit="kilometers").add_to(m)
+    MousePosition(position="bottomleft",separator=" | ",prefix="Latitude / Longitude:",
+                  num_digits=4).add_to(m)
+    folium.LayerControl(collapsed=True,position="topright").add_to(m)
+
+    add_collapsible_glm_legend(m, AGE_GROUPS)
+    return m
+
+
+def build_live_features(df: pd.DataFrame, *, view_geometry=None, uploaded_overlay=None):
+    """Camada GLM dinâmica. Atualizar seus flashes NÃO recria o mapa Leaflet.
+
+    O streamlit-folium substitui feature_group_to_add em tempo real, mantendo
+    pan/zoom e a mesma instância de mapa. Não aplicar fit_bounds nesta camada.
+    """
+    import folium
+    from folium.plugins import FastMarkerCluster
+
+    group = folium.FeatureGroup(name="Flashes GLM (atualização dinâmica)", show=True)
     # Ordem visual solicitada no controle: 0–5, 5–10, 10–20, 20–30 min.
     for label, _, _, color in AGE_GROUPS:
         sub = df[df.get("age_group", pd.Series(index=df.index, dtype="object")) == label]
@@ -283,61 +343,32 @@ def build_live_map(df: pd.DataFrame, *, view_geometry=None, enable_area_draw: bo
             name=f"{label} ({len(data):,})".replace(",", "."),
             show=True,
             options={"disableClusteringAtZoom": 7, "maxClusterRadius": 45},
-        ).add_to(m)
+        ).add_to(group)
 
-    if view_geometry is not None:
+    if uploaded_overlay is not None:
+        folium.GeoJson(
+            uploaded_overlay, name="Arquivo geográfico do usuário",
+            style_function=lambda _: {
+                "color":"#f9c74f", "weight":2.8,
+                "fillColor":"#f9c74f", "fillOpacity":0.09,
+            },
+            tooltip=folium.GeoJsonTooltip(fields=["name"], aliases=["Camada:"])
+                if all("name" in (f.get("properties") or {}) for f in uploaded_overlay.get("features", []))
+                else None,
+        ).add_to(group)
+
+    if view_geometry is not None and uploaded_overlay is None:
         try:
             from shapely.geometry import mapping
-            minx, miny, maxx, maxy = view_geometry.bounds
-            dx = max(0.05, (maxx - minx) * 0.06)
-            dy = max(0.05, (maxy - miny) * 0.06)
             folium.GeoJson(
                 mapping(view_geometry),
                 name="Área selecionada",
                 style_function=lambda _: {
                     "color": "#ff7a18", "weight": 2.5,
                     "fillColor": "#ff7a18", "fillOpacity": 0.06,
-                },
-                show=True,
-            ).add_to(m)
-            m.fit_bounds([[miny-dy, minx-dx], [maxy+dy, maxx+dx]], padding=(12, 12))
+                }, show=True,
+            ).add_to(group)
         except Exception:
-            lon_min, lat_min, lon_max, lat_max = BRAZIL_VIEW_BBOX
-            m.fit_bounds([[lat_min, lon_min], [lat_max, lon_max]], padding=(12, 12))
-    else:
-        lon_min, lat_min, lon_max, lat_max = BRAZIL_VIEW_BBOX
-        m.fit_bounds([[lat_min, lon_min], [lat_max, lon_max]], padding=(12, 12))
+            pass
 
-    if enable_area_draw:
-        Draw(
-            export=False,
-            position="topleft",
-            draw_options={
-                "polyline": False, "polygon": False, "circle": False,
-                "marker": False, "circlemarker": False,
-                "rectangle": {
-                    "shapeOptions": {
-                        "color": "#ff7a18", "weight": 2.5, "fillOpacity": 0.08
-                    }
-                },
-            },
-            edit_options={"edit": False, "remove": True},
-        ).add_to(m)
-
-    Fullscreen(position="topleft").add_to(m)
-    folium.LayerControl(collapsed=False).add_to(m)
-
-    legend_items = "".join(
-        f"<div style='margin:3px 0'><span style='display:inline-block;width:11px;height:11px;"
-        f"border-radius:50%;background:{color};margin-right:7px'></span>{label}</div>"
-        for label, _, _, color in AGE_GROUPS
-    )
-    legend = f"""
-    <div style="position:fixed;bottom:30px;left:30px;z-index:9999;background:rgba(20,20,20,.88);
-                color:white;padding:10px 12px;border-radius:8px;font-size:13px;
-                box-shadow:0 1px 6px rgba(0,0,0,.35)">
-      <b>Idade do flash</b>{legend_items}
-    </div>
-    """
-    m.get_root().html.add_child(folium.Element(legend))
-    return m
+    return group

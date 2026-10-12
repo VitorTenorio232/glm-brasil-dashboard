@@ -1,0 +1,27 @@
+.fv-map-shell {width:100%;height:805px;background:#0b1420;color:#edf4ff;border:1px solid #304459;border-radius:12px;overflow:hidden;position:relative;font:13px/1.3 system-ui,sans-serif;}
+.fv-map-canvas {position:absolute;inset:0 0 138px 0;overflow:hidden;}
+.fv-map-loading {position:absolute;top:45%;left:50%;transform:translate(-50%,-50%);padding:12px 20px;border-radius:8px;background:rgba(6,15,29,.92);color:#fff;z-index:6;pointer-events:none;}
+.fv-map-loading[data-hidden="true"] {display:none;}
+.fv-map-hud{position:absolute;top:12px;left:12px;background:rgba(5,16,30,.85);border:1px solid #426077;border-radius:8px;padding:7px 12px;font-size:12px;z-index:3;pointer-events:none;}
+.fv-map-timeline {position:absolute;bottom:0;left:0;right:0;height:136px;background:#0d1827;border-top:1px solid #36526a;padding:12px 16px;box-sizing:border-box;z-index:4;}
+.fv-map-controls{display:flex;align-items:center;gap:7px;flex-wrap:wrap;}
+.fv-map-controls button{cursor:pointer;background:#1c3146;border:1px solid #46647e;border-radius:7px;color:#edf4ff;font:inherit;font-weight:600;min-height:33px;padding:5px 10px;}
+.fv-map-controls button:hover{background:#295071;}
+.fv-map-controls button[data-act="live"]{color:#94f2ca;}
+.fv-map-controls select{background:#19283a;border:1px solid #46647e;color:white;border-radius:6px;padding:5px;}
+.fv-map-controls label{font-size:11px;color:#d5e3f2;display:flex;align-items:center;gap:5px;}
+.fv-map-frame-label{margin-left:auto;color:#b7cadb;font-size:12px;min-width:150px;text-align:right;}
+.fv-map-progress{display:flex;align-items:center;gap:10px;margin-top:12px;color:#b7c8d9;font-size:11px;}
+.fv-map-progress input{flex:1;accent-color:#3eafff;cursor:pointer;}
+.fv-map-legend {position:absolute;top:12px;right:62px;background:rgba(5,16,30,.88);border:1px solid #3b5369;border-radius:8px;padding:9px 12px;z-index:3;display:flex;flex-direction:column;gap:5px;font-size:11px;max-width:190px;}
+.fv-map-legend b {margin-bottom:2px;}
+.fv-map-legend span{display:flex;align-items:center;gap:5px;}
+.fv-map-legend i{width:10px;height:10px;border-radius:50%;display:inline-block;}
+.fv-map-shell.fv-map-drawing .fv-map-canvas{cursor:crosshair !important;}
+@media(max-width:700px){.fv-map-shell{height:720px}.fv-map-canvas{bottom:160px}.fv-map-timeline{height:158px}.fv-map-frame-label{margin-left:0;text-align:left}.fv-map-legend{top:58px;right:12px}.fv-map-hud{right:12px;left:auto}.fv-map-controls button{font-size:11px;min-height:28px}}
+
+/* MapLibre V8.3: agrupamentos multicor e símbolos de raios. */
+.fv-cluster-donut { box-sizing:border-box; display:flex; align-items:center; justify-content:center; border:2px solid rgba(232,241,255,.85); border-radius:50%; cursor:pointer; box-shadow:0 2px 14px rgba(0,0,0,.65); pointer-events:auto; font:700 12px system-ui,sans-serif; }
+.fv-cluster-donut:hover { filter:brightness(1.15); transform:scale(1.06); }
+.fv-cluster-donut-inner {border-radius:50%;display:flex;align-items:center;justify-content:center;background:#071626;color:white;border:1px solid #57768c;box-sizing:border-box;text-shadow:0 1px 1px black;}
+.fv-map-legend i {border-radius:0;clip-path:polygon(48% 0%,13% 54%,45% 54%,34% 100%,88% 40%,56% 40%,74% 0%);width:12px;height:15px;}

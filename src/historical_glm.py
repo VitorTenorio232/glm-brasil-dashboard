@@ -573,9 +573,13 @@ def _to_wgs84(gdf):
 
 @lru_cache(maxsize=4)
 def load_states(year: int = 2022):
-    from geobr import read_state
-
-    gdf = _to_wgs84(read_state(year=year))
+    local_file = Path(__file__).resolve().parents[1] / "data" / "admin" / f"states_{year}.parquet"
+    if local_file.is_file():
+        import geopandas as gpd
+        gdf = _to_wgs84(gpd.read_parquet(local_file))
+    else:
+        from geobr import read_state
+        gdf = _to_wgs84(read_state(year=year))
     code_col = _find_col(gdf.columns, "code_state", "code_uf")
     uf_col = _find_col(gdf.columns, "abbrev_state", "sigla_uf")
     name_col = _find_col(gdf.columns, "name_state", "nome_uf")
@@ -587,9 +591,15 @@ def load_states(year: int = 2022):
 
 @lru_cache(maxsize=32)
 def load_municipalities(uf: str, year: int = 2022):
-    from geobr import read_municipality
-
-    gdf = _to_wgs84(read_municipality(code_muni=uf, year=year))
+    local_file = Path(__file__).resolve().parents[1] / "data" / "admin" / f"municipalities_{year}.parquet"
+    if local_file.is_file():
+        import geopandas as gpd
+        gdf = _to_wgs84(gpd.read_parquet(local_file))
+        uf_col_local = _find_col(gdf.columns, "abbrev_state", "sigla_uf")
+        gdf = gdf[gdf[uf_col_local].astype(str).str.upper() == str(uf).upper()].copy()
+    else:
+        from geobr import read_municipality
+        gdf = _to_wgs84(read_municipality(code_muni=uf, year=year))
     code_col = _find_col(gdf.columns, "code_muni", "code_municipality", "codigo_ibge")
     name_col = _find_col(gdf.columns, "name_muni", "name_municipality", "nome_muni")
     uf_col = None
@@ -611,9 +621,13 @@ def load_municipalities(uf: str, year: int = 2022):
 
 @lru_cache(maxsize=2)
 def load_country(year: int = 2022):
-    from geobr import read_country
-
-    gdf = _to_wgs84(read_country(year=year))
+    local_file = Path(__file__).resolve().parents[1] / "data" / "admin" / f"country_{year}.parquet"
+    if local_file.is_file():
+        import geopandas as gpd
+        gdf = _to_wgs84(gpd.read_parquet(local_file))
+    else:
+        from geobr import read_country
+        gdf = _to_wgs84(read_country(year=year))
     # O Brasil pode vir com uma ou mais feições; a união garante uma geometria única.
     return gdf.geometry.union_all() if hasattr(gdf.geometry, "union_all") else gdf.unary_union
 

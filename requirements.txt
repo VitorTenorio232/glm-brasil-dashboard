@@ -1,6 +1,6 @@
 # Dependências da versão operacional atual do LUME-GLM.
 # As bibliotecas históricas/geoespaciais serão reincorporadas quando a base histórica entrar em produção.
-streamlit>=1.48,<2
+streamlit>=1.55,<2
 streamlit-folium>=0.25
 folium>=0.20
 branca>=0.8
@@ -11,14 +11,19 @@ netCDF4>=1.7
 boto3>=1.35
 botocore>=1.35
 pytz
-h5py>=3.11
-matplotlib>=3.9
-huggingface_hub>=0.34
 plotly>=6.2
-geobr==1.0.0
+h5py>=3.12
+scipy>=1.14
+matplotlib>=3.9
+requests>=2.31
 geopandas>=1.0
 shapely>=2.0
 pyogrio>=0.10
 pyproj>=3.7
-scipy>=1.14
+geobr==1.0.0
 pyarrow>=18
+huggingface_hub>=0.28
+
+# Flash View — V6 Sala de Operações
+Pillow>=10,<13
+boto3>=1.35,<2
