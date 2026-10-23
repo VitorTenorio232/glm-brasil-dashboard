@@ -17,7 +17,7 @@ import pandas as pd
 
 BRAZIL_VIEW_BBOX = (-75.5, -35.5, -32.0, 6.5)  # lon_min, lat_min, lon_max, lat_max
 # Limite superior da base histórica atualmente processada.
-HISTORICAL_MAX_DATE = pd.Timestamp(2022, 12, 31)
+HISTORICAL_MAX_DATE = pd.Timestamp(2023, 12, 31)
 
 VARIABLES = {
     "flash_count": {

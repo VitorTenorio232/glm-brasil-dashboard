@@ -1044,7 +1044,7 @@ if tab_clim.open:
                 "**Climatologia:** para número de flashes, calcula-se a **média climatológica das contagens** "
                 "dos períodos selecionados; para energia, área e duração, mantém-se a média ponderada pelos flashes."
             )
-        st.info("📅 Base histórica processada disponível até **31/12/2022**.")
+        st.info("📅 Base histórica processada disponível até **31/12/2023**.")
 
         if historical_repo is None:
             _historical_unavailable()
@@ -1470,7 +1470,7 @@ if tab_series.open:
         st.markdown('<div class="section-heading">Séries temporais</div>', unsafe_allow_html=True)
         st.caption(
             "Séries diárias, mensais ou anuais calculadas somente após você definir o período e clicar em "
-            "**Calcular série**. A base histórica processada termina em 31/12/2022."
+            "**Calcular série**. A base histórica processada termina em 31/12/2023."
         )
 
         if historical_repo is None:
