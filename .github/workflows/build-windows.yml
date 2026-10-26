@@ -1,1 +1,76 @@
+name: Build Flash View (Windows)
+
+on:
+  workflow_dispatch:          # botão "Run workflow" na aba Actions
+  push:
+    tags: ["v*"]              # ou ao criar uma tag, ex.: v1.0.0
+
+permissions:
+  contents: write
+
+jobs:
+  build:
+    runs-on: windows-latest
+    timeout-minutes: 60
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+          cache: pip
+
+      - name: Instalar dependências
+        run: |
+          python -m pip install --upgrade pip wheel
+          pip install -r requirements.txt
+          pip install -r desktop/requirements-desktop.txt
+
+      - name: Testar se o app.py roda
+        shell: bash
+        run: |
+          python - <<'EOF'
+          from streamlit.testing.v1 import AppTest
+          at = AppTest.from_file("app.py", default_timeout=240).run()
+          print("Abas:", [t.label for t in at.tabs])
+          assert len(at.tabs) >= 5, "o app não renderizou as abas"
+          EOF
+
+      - name: Gerar executável
+        run: pyinstaller --noconfirm desktop/FlashView.spec
+
+      - name: Teste de fumaça do .exe (servidor responde)
+        shell: pwsh
+        run: |
+          $log = "$env:RUNNER_TEMP\fv.log"
+          $p = Start-Process -FilePath "dist\FlashView\FlashView.exe" -ArgumentList "--server","8765","--log",$log -PassThru
+          $ok = $false
+          for ($i = 0; $i -lt 90; $i++) {
+            try { if ((Invoke-WebRequest -UseBasicParsing http://127.0.0.1:8765/_stcore/health).StatusCode -eq 200) { $ok = $true; break } } catch {}
+            Start-Sleep -Seconds 2
+          }
+          Stop-Process -Id $p.Id -Force -ErrorAction SilentlyContinue
+          Get-Content $log -ErrorAction SilentlyContinue | Select-Object -Last 40
+          if (-not $ok) { throw "O servidor do FlashView.exe não respondeu" }
+
+      - name: Copiar instruções e exemplo de secrets
+        shell: pwsh
+        run: |
+          Copy-Item desktop\LEIA-ME-WINDOWS.txt dist\FlashView\
+          Copy-Item desktop\secrets.toml.exemplo dist\FlashView\
+
+      - name: Compactar
+        shell: pwsh
+        run: Compress-Archive -Path dist\FlashView -DestinationPath FlashView-Windows-x64.zip
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: FlashView-Windows-x64
+          path: FlashView-Windows-x64.zip
+
+      - name: Publicar na página de Releases (somente em tags)
+        if: startsWith(github.ref, 'refs/tags/')
+        uses: softprops/action-gh-release@v2
+        with:
+          files: FlashView-Windows-x64.zip
 
