@@ -1,0 +1,17 @@
+FLASH VIEW - APLICATIVO WINDOWS
+
+Como abrir:
+  1. Extraia o ZIP inteiro numa pasta (ex.: Documentos\FlashView). Nao rode de dentro do ZIP.
+  2. Abra FlashView.exe. Mantenha a pasta _internal ao lado dele.
+  3. Se o Windows SmartScreen avisar, clique em 'Mais informacoes' > 'Executar assim mesmo'
+     (o executavel nao tem assinatura digital).
+
+Dados historicos (Climatologia, Series, Ranking):
+  Renomeie secrets.toml.exemplo para secrets.toml e coloque seu token do Hugging Face.
+  Tambem pode ficar em %APPDATA%\FlashView\secrets.toml.
+
+Requisitos: Windows 10 ou 11 (64 bits) com Microsoft Edge WebView2 (ja vem no Windows 11).
+  Sem WebView2, o app abre automaticamente no navegador padrao.
+  Para forcar o navegador: FlashView.exe --browser
+
+Problemas? Veja o log em %LOCALAPPDATA%\FlashView\flashview.log
