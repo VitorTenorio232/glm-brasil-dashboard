@@ -12,9 +12,8 @@ import tempfile
 import xml.etree.ElementTree as ET
 from zipfile import ZipFile, BadZipFile
 
-from shapely.geometry import shape, mapping, Polygon, LineString, Point, GeometryCollection
+from shapely.geometry import shape, mapping, Polygon, LineString, Point
 from shapely.ops import unary_union
-from shapely.validation import explain_validity
 
 MAX_UPLOAD_BYTES = 20 * 1024 * 1024
 MAX_UNPACKED_BYTES = 85 * 1024 * 1024

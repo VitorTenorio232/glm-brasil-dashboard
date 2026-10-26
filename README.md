@@ -1,168 +1,81 @@
+# ⚡ Flash View
 
-## Instalação V4 limpa
+Painel web de **relâmpagos totais no Brasil** a partir do sensor **GLM** (Geostationary Lightning Mapper)
+do satélite **GOES-19** (NOAA). Feito com Python e Streamlit.
 
-Para substituir a V3 sem aplicar patch, siga `INSTALACAO_LIMPA_V4.md`.
-A V4 deve ser extraída em uma pasta nova e pode reutilizar apenas os diretórios de dados da V3.
-# ⚡ GLM Brasil — V4
+[![Testes do site](../../actions/workflows/tests.yml/badge.svg)](../../actions/workflows/tests.yml)
 
-Dashboard de análise espacial e temporal de flashes do **GOES Geostationary Lightning Mapper (GLM)** com Python, Streamlit, GeoPandas, DuckDB/Parquet e integração opcional com Google Earth Engine.
+## O que o site oferece
 
-A V4 mantém o backend validado da V3 e muda o produto principal para:
+| Aba | O que mostra |
+|---|---|
+| ⚡ **Relâmpagos em tempo real** | Flashes dos últimos 30 min no mapa de satélite (atualiza a cada ~60 s), animação da última hora, seleção de área, importação de SHP/KMZ/KML/GeoJSON e exportação PNG/JPEG/GIF. |
+| 🌦️ **Climatologia** | Mapas diários, mensais e anuais, climatologias e **anomalias** (período − média dos anos de referência) para Brasil, estado, município, retângulo ou buffer. |
+| 📈 **Séries temporais** | Séries diárias, mensais ou anuais de uma área, com opção de **comparar duas áreas**. Download em PNG, JPEG e CSV. |
+| 🏆 **Ranking** | Municípios e estados com maior densidade ou número de flashes no período. |
+| 📊 **Tendência** | Atividade nos últimos 10/20/30 min em um ponto + raio ou em um **estado inteiro**, e um panorama das 27 UFs (clique numa linha para abrir o estado). |
 
-> **Área → Período → Análises**
+> Um **flash** é um relâmpago completo detectado do espaço — inclui descargas dentro das nuvens e as que
+> tocam o solo. A tendência é observacional; não é previsão nem alerta oficial.
 
-## Produto principal
+## De onde vêm os dados
 
-O usuário escolhe uma das três áreas:
+- **Tempo real:** arquivos GLM-L2-LCFA (~20 s cada) do bucket público da NOAA na AWS. Não precisa de chave.
+- **Histórico (até 31/12/2023):** grades NetCDF processadas, guardadas num Dataset privado do Hugging Face
+  (`01_HOURLY`, `02_DAILY`, `03_MONTHLY`, `04_YEARLY`, `05_RANKINGS`). Precisa de `HF_TOKEN`.
+- **Limites de estados e municípios:** IBGE, via pacote `geobr`.
 
-1. **Município** — UF + município;
-2. **Estado** — UF;
-3. **Região personalizada** — polígono ou retângulo desenhado diretamente em um mapa de satélite.
+## Rodar no seu computador
 
-Depois escolhe o período e executa a análise. Todos os produtos são recalculados para exatamente aquela seleção.
-
-## Produtos do V4
-
-- mapa de satélite com flashes;
-- modo de últimos 15 min: vermelho 0–5, azul 5–10, verde 10–15 min;
-- mapa de calor para períodos grandes;
-- contagem e densidade de flashes;
-- séries diária, mensal e anual;
-- média mensal climatológica;
-- anomalias absoluta, percentual e z-score;
-- dias com relâmpagos;
-- flashes/dia e flashes/dia ativo;
-- máximos horário e diário;
-- duração, energia e área dos flashes: média, mediana, desvio, P90, P95, P99 e máximo;
-- ciclo de 24 h;
-- divisão diurno/noturno;
-- sazonalidade mensal e DJF/MAM/JJA/SON;
-- **Estado:** ranking municipal;
-- **Região personalizada:** ranking estadual e municipal usando somente os flashes dentro do polígono;
-- **Município:** perfil dos 12 meses, total, média, mediana, mínimo, máximo, participação climatológica e identificação do mês climatologicamente mais/menos ativo.
-
-## Arquitetura
-
-```text
-NOAA/AWS GLM-L2-LCFA
-        ↓
-    NetCDF 20 s
-        ↓
- xarray + QC
-        ↓
- flash_lat / flash_lon
-        ↓
- GeoPandas + municípios IBGE
-        ↓
- flashes individuais enriquecidos
-        ↓
- Parquet / DuckDB
-        ↓
-┌──────────────┬──────────────┬────────────────────┐
-│ Município    │ Estado       │ Polígono desenhado │
-└──────────────┴──────────────┴────────────────────┘
-        ↓
- filtro espacial + temporal
-        ↓
- cálculos dinâmicos V4
-        ↓
- Streamlit + mapa de satélite
-        ↓
- Earth Engine opcional
-```
-
-## Instalação
+Requer Python 3.12.
 
 ```bash
-python3 -m venv .venv
-source .venv/bin/activate
-python -m pip install --upgrade pip setuptools wheel
-pip install -r requirements.txt
-```
-
-No Ubuntu, se necessário:
-
-```bash
-sudo apt update
-sudo apt install -y gdal-bin libgdal-dev libgeos-dev libproj-dev python3-dev
-```
-
-## Teste do pacote
-
-```bash
-python -m pytest -q
-python -m compileall -q app.py src scripts pages tests
-```
-
-## Preparar municípios
-
-```bash
-python scripts/prepare_municipalities.py --year 2025 --full
-```
-
-Para evitar enviar centenas de MB ao navegador, gere também a malha leve de visualização:
-
-```bash
-python scripts/prepare_web_geometry.py --tolerance-m 1000
-```
-
-A malha completa continua sendo usada no spatial join. A versão `municipios_brasil_web.geojson` é apenas para o frontend.
-
-## Processar GLM real
-
-A V4 depende dos **flashes individuais** para permitir região desenhada e cálculos dinâmicos. Portanto use `--save-flashes`:
-
-```bash
-python scripts/process_glm.py \
-  --raw-dir data/raw \
-  --municipalities data/municipalities/municipios_brasil.gpkg \
-  --output data/processed \
-  --save-flashes
-```
-
-Isso deve criar, entre outros:
-
-```text
-data/processed/flashes_enriched.parquet
-```
-
-## Histórico grande
-
-Para anos de dados, não mantenha tudo em um único Parquet. Use:
-
-```bash
-python scripts/ingest_partitioned.py \
-  --raw-dir data/raw \
-  --municipalities data/municipalities/municipios_brasil.gpkg \
-  --output data/flashes
-```
-
-A V4 consegue consultar `data/flashes/**/*.parquet` com DuckDB e filtrar período/município/UF antes de materializar os dados em memória.
-
-## Executar
-
-Para evitar conflito com Conda/venv, prefira:
-
-```bash
+python -m venv .venv
+# Windows: .venv\Scripts\activate    |    Linux/Mac: source .venv/bin/activate
+python -m pip install -r requirements-dev.txt
 python -m streamlit run app.py
 ```
 
-## Páginas
+Para as abas históricas, copie `.streamlit/secrets.toml.example` para `.streamlit/secrets.toml` e
+preencha o `HF_TOKEN`. Sem o token, a aba de tempo real e a Tendência continuam funcionando.
 
-- `app.py` — **Análise**: produto principal V4;
-- `pages/02_Monitoramento.py` — últimos 15 minutos disponíveis;
-- `pages/03_Dados.py` — diagnóstico da base e comandos de pipeline;
-- `pages/04_Metodologia.py` — definições e cálculos.
+## Publicar no Streamlit Community Cloud
 
-## Notas metodológicas
+1. Em [share.streamlit.io](https://share.streamlit.io), crie o app apontando para este repositório, branch `main`, arquivo `app.py`.
+2. Em **Advanced settings**, escolha **Python 3.12** (o Cloud ignora o `runtime.txt`).
+3. Em **Settings → Secrets**, cole o conteúdo do `secrets.toml.example` com o seu token.
+4. Cada `push` na `main` atualiza o site automaticamente.
 
-- unidade primária: **flash** GLM;
-- o GLM mede **total lightning**;
-- município: associação pelo centroide do flash;
-- região desenhada: teste ponto-em-polígono diretamente nos flashes individuais;
-- climatologia mensal inclui períodos sem flashes como zero dentro do intervalo selecionado;
-- V4 permite UTC ou Brasília (UTC-3);
-- divisão diurno/noturno atual: 06:00–17:59 / 18:00–05:59 na base escolhida;
-- para climatologia/anomalias robustas, use vários anos de observações.
+## Estrutura do repositório
 
-Veja também `V4_MIGRACAO.md`.
+```text
+app.py                     # interface Streamlit (todas as abas)
+src/
+  realtime_glm.py          # busca dos arquivos GLM recentes na NOAA/AWS
+  glm_reader.py            # leitura rápida dos NetCDF LCFA (h5py, com fallback xarray)
+  maplibre_realtime.*      # mapa ao vivo (MapLibre GL JS)
+  previsao_flash.py        # aba Tendência e panorama por estado
+  alertas_flash.py         # cálculo da tendência 0–10 / 10–20 / 20–30 min
+  historical_glm.py        # base histórica, climatologia, anomalia, séries e mapas
+  ranking_glm.py           # ranking administrativo
+  cartographic_export.py   # pranchas PNG/JPEG/GIF
+  export_area.py, spatial_tools.py, map_uploads.py, view_exports.py
+scripts/                   # processamento e envio da base histórica ao Hugging Face
+tests/                     # testes automatizados (pytest)
+desktop/                   # aplicativo Windows (.exe) — ver desktop/COMO-GERAR.md
+docs/                      # arquitetura, validação e documentos antigos (docs/historico)
+.github/workflows/         # testes do site e build do .exe
+```
+
+## Testes
+
+```bash
+python -m pytest -q                              # testes automatizados
+python -m ruff check app.py src tests --select F # erros de código
+```
+
+Os mesmos testes rodam no GitHub a cada `push` (aba **Actions → Testes do site**).
+
+## Histórico de mudanças
+
+Veja [CHANGELOG.md](CHANGELOG.md).

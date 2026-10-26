@@ -6,7 +6,7 @@ atividade detectada no recorte selecionado e a sua tendência recente.
 from __future__ import annotations
 
 from dataclasses import dataclass
-from datetime import datetime, timezone
+from datetime import datetime
 from html import escape
 import math
 
@@ -74,9 +74,13 @@ def render_observational_alert(st, summary: LightningActivity) -> None:
     with st.container(border=True):
         st.markdown('**⚡ Monitoramento de atividade elétrica — GLM**')
         c1, c2, c3 = st.columns(3)
-        c1.metric('Flashes · últimos 10 min', f'{summary.latest_10min:,}'.replace(',', '.'))
+        delta = (f'{summary.delta_percent:+.0f}% vs. 10 min anteriores'
+                 if summary.delta_percent is not None else None)
+        c1.metric('Flashes · últimos 10 min', f'{summary.latest_10min:,}'.replace(',', '.'),
+                  delta=delta, delta_color='inverse')
         c2.metric('Flashes · 10–20 min', f'{summary.previous_10min:,}'.replace(',', '.'))
-        c3.metric('Tendência observada', summary.trend)
+        # Valor curto para não ser cortado pelo st.metric.
+        c3.metric('Tendência observada', summary.trend.replace('Relativamente estável', 'Estável'))
         if summary.stale:
             st.warning('Dados GLM desatualizados. Não é possível avaliar a atividade atual com segurança.')
         elif summary.latest_10min:

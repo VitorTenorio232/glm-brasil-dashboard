@@ -2,7 +2,6 @@ from __future__ import annotations
 
 from pathlib import Path
 import geopandas as gpd
-import pandas as pd
 
 AREA_CRS = 5880  # SIRGAS 2000 / Brazil Polyconic
 

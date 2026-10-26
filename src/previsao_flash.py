@@ -9,7 +9,7 @@ from pathlib import Path
 from zoneinfo import ZoneInfo
 
 import folium
-from folium.plugins import FastMarkerCluster, Fullscreen
+from folium.plugins import Fullscreen
 import numpy as np
 import pandas as pd
 import streamlit as st
@@ -101,9 +101,45 @@ def flashes_near_point(flashes: pd.DataFrame, lat: float, lon: float,
     return flashes.loc[np.isfinite(dist) & (dist <= float(radius_km))].copy()
 
 
+@st.cache_data(ttl=24*3600, show_spinner=False, max_entries=1)
+def _simplified_states():
+    """UFs simplificadas (~1 km) para filtrar flashes rapidamente."""
+    from src.historical_glm import load_states
+    states = load_states(2022).copy()
+    states["geometry"] = states.geometry.simplify(0.01, preserve_topology=True)
+    return states
+
+
+@st.cache_data(ttl=120, show_spinner=False, max_entries=2)
+def state_activity_table(observation_key: str, _flashes: pd.DataFrame,
+                         observation_end, latency_minutes: float) -> pd.DataFrame:
+    """Atividade e tendência observada de cada UF no snapshot atual.
+
+    ``observation_key`` identifica o snapshot; ``_flashes`` não é hasheado.
+    """
+    from src.spatial_tools import filter_points_by_geometry
+    rows = []
+    states = _simplified_states()
+    for rec in states.itertuples():
+        minx, miny, maxx, maxy = rec.geometry.bounds
+        near = _flashes.loc[_flashes["lon"].between(minx, maxx) & _flashes["lat"].between(miny, maxy)]
+        inside = filter_points_by_geometry(near, rec.geometry)
+        s = analyze_glm_activity(inside, observation_end, latency_minutes)
+        rows.append({
+            "UF": rec.abbrev_state, "Estado": rec.name_state,
+            "Últimos 10 min": s.latest_10min, "10–20 min": s.previous_10min,
+            "20–30 min": s.older_10min,
+            "Tendência": s.trend.replace("Relativamente estável", "Estável"),
+        })
+    return (pd.DataFrame(rows)
+            .sort_values(["Últimos 10 min", "10–20 min"], ascending=False)
+            .reset_index(drop=True))
+
+
 def build_observed_map(lat: float, lon: float, radius_km: int,
-                       flashes: pd.DataFrame, *, center=None, zoom=4):
-    """Mapa interativo com TODOS os flashes presentes no círculo selecionado."""
+                       flashes: pd.DataFrame, *, center=None, zoom=4, geometry=None,
+                       geometry_label: str = "Área selecionada"):
+    """Mapa interativo com TODOS os flashes presentes no círculo ou estado selecionado."""
     center = center or [lat, lon]
     m = folium.Map(location=center, zoom_start=int(zoom), tiles=None,
                    control_scale=True, prefer_canvas=True)
@@ -114,8 +150,17 @@ def build_observed_map(lat: float, lon: float, radius_km: int,
     ).add_to(m)
     folium.TileLayer("OpenStreetMap", name="Ruas", show=False).add_to(m)
 
+    if geometry is not None:
+        from shapely.geometry import mapping
+        from src.spatial_tools import padded_bounds
+        folium.GeoJson(
+            mapping(geometry), name=geometry_label, tooltip=geometry_label,
+            style_function=lambda _: {"color": "#f43f5e", "weight": 2.5,
+                                      "fillColor": "#f43f5e", "fillOpacity": 0.06},
+        ).add_to(m)
+        m.fit_bounds(padded_bounds(geometry))
     # Sem ponto selecionado, não desenha marcador ou círculo inicial.
-    if lat is not None and lon is not None:
+    elif lat is not None and lon is not None:
         folium.Circle([lat, lon], radius=int(radius_km)*1000,
                       color="#f43f5e", weight=2.5, fill=True,
                       fill_opacity=0.08, tooltip=f"Área GLM: raio {radius_km} km").add_to(m)
@@ -216,6 +261,11 @@ def render_trend_tab(*, snapshot_loader=None):
     pending = st.session_state.pop("fv_trend_pending_point", None)
     if pending is not None:
         _update_point(pending[0], pending[1], recenter=pending[2])
+    # Linha clicada no "Panorama por estado": aplica antes de criar os widgets.
+    pending_state = st.session_state.pop("fv_trend_pending_state", None)
+    if pending_state is not None:
+        st.session_state["fv_trend_area_mode"] = "Estado inteiro"
+        st.session_state["fv_trend_state_area"] = pending_state
 
     snapshot = None
     load_error = None
@@ -226,75 +276,110 @@ def render_trend_tab(*, snapshot_loader=None):
             load_error = exc
 
     col_map, col_side = st.columns([1.7, 1], gap="large")
+    state_geom = None
+    state_label = None
+    radius = int(st.session_state.get("fv_trend_obs_radius", 40))
     with col_side:
         st.markdown("**Área de interesse**")
-        radius = st.slider("Raio da análise (km)", 10, 100, 40, 5,
-                           key="fv_trend_obs_radius")
-        lat = st.number_input("Latitude (°)", min_value=-90.0, max_value=90.0,
-                              value=None, step=0.0001, format="%.5f",
-                              placeholder="Digite a latitude", key="fv_trend_lat")
-        lon = st.number_input("Longitude (°)", min_value=-180.0, max_value=180.0,
-                              value=None, step=0.0001, format="%.5f",
-                              placeholder="Digite a longitude", key="fv_trend_lon")
-        if st.button("📍 Aplicar coordenadas", key="fv_trend_apply_coords", width="stretch"):
-            if lat is None or lon is None:
-                st.warning("Informe latitude e longitude antes de aplicar.")
-            else:
-                # Atualiza estado de SELEÇÃO, não altera as chaves dos inputs.
-                point = _validated_point(lat, lon)
-                st.session_state["fv_trend_selected_point"] = point
-                st.session_state["fv_trend_map_center"] = list(point)
-                st.session_state["fv_trend_map_zoom"] = 7
-                st.rerun()
+        # Valor inicial via session_state (sem default=), pois a tabela também altera este controle.
+        st.session_state.setdefault("fv_trend_area_mode", "Ponto e raio")
+        area_mode = st.segmented_control(
+            "Tipo de análise", ["Ponto e raio", "Estado inteiro"], key="fv_trend_area_mode",
+        ) or "Ponto e raio"
 
-        st.markdown("**Ou escolha um município brasileiro**")
-        try:
-            df_cities = city_catalog()
-            ufs = sorted(df_cities["abbrev_state"].dropna().unique().tolist())
-            uf = st.selectbox("Estado (UF)", ["— Selecione —"] + ufs,
-                              key="fv_trend_uf")
-            if uf != "— Selecione —":
-                sub = df_cities[df_cities["abbrev_state"] == uf].sort_values("name_muni")
-                names = sub["name_muni"].astype(str).tolist()
-                city = st.selectbox("Município", ["— Selecione —"] + names,
-                                    key="fv_trend_city")
-                if city != "— Selecione —" and st.button("📌 Ir para município",
-                         key="fv_trend_go_city", width="stretch"):
-                    rec = sub[sub["name_muni"].eq(city)].iloc[0]
-                    _queue_point(rec["lat"], rec["lon"])
+        if area_mode == "Estado inteiro":
+            try:
+                states = _simplified_states()
+                lookup = {f"{r.abbrev_state} — {r.name_state}": r.abbrev_state
+                          for r in states.itertuples()}
+                chosen = st.selectbox("Estado", list(lookup), key="fv_trend_state_area")
+                state_geom = states.loc[states["abbrev_state"].eq(lookup[chosen])].iloc[0].geometry
+                state_label = chosen
+            except Exception as exc:
+                st.warning("Limites dos estados indisponíveis nesta sessão.")
+                with st.expander("Detalhes técnicos"):
+                    st.exception(exc)
+        else:
+            radius = st.slider("Raio da análise (km)", 10, 100, 40, 5,
+                               key="fv_trend_obs_radius")
+            lat = st.number_input("Latitude (°)", min_value=-90.0, max_value=90.0,
+                                  value=None, step=0.0001, format="%.5f",
+                                  placeholder="Digite a latitude", key="fv_trend_lat")
+            lon = st.number_input("Longitude (°)", min_value=-180.0, max_value=180.0,
+                                  value=None, step=0.0001, format="%.5f",
+                                  placeholder="Digite a longitude", key="fv_trend_lon")
+            if st.button("📍 Aplicar coordenadas", key="fv_trend_apply_coords", width="stretch"):
+                if lat is None or lon is None:
+                    st.warning("Informe latitude e longitude antes de aplicar.")
+                else:
+                    # Atualiza estado de SELEÇÃO, não altera as chaves dos inputs.
+                    point = _validated_point(lat, lon)
+                    st.session_state["fv_trend_selected_point"] = point
+                    st.session_state["fv_trend_map_center"] = list(point)
+                    st.session_state["fv_trend_map_zoom"] = 7
                     st.rerun()
-        except Exception as exc:
-            st.warning("Lista de municípios indisponível nesta sessão.")
-            with st.expander("Detalhes da lista de cidades"):
-                st.exception(exc)
+
+            st.markdown("**Ou escolha um município brasileiro**")
+            try:
+                df_cities = city_catalog()
+                ufs = sorted(df_cities["abbrev_state"].dropna().unique().tolist())
+                uf = st.selectbox("Estado (UF)", ["— Selecione —"] + ufs,
+                                  key="fv_trend_uf")
+                if uf != "— Selecione —":
+                    sub = df_cities[df_cities["abbrev_state"] == uf].sort_values("name_muni")
+                    names = sub["name_muni"].astype(str).tolist()
+                    city = st.selectbox("Município", ["— Selecione —"] + names,
+                                        key="fv_trend_city")
+                    if city != "— Selecione —" and st.button("📌 Ir para município",
+                             key="fv_trend_go_city", width="stretch"):
+                        rec = sub[sub["name_muni"].eq(city)].iloc[0]
+                        _queue_point(rec["lat"], rec["lon"])
+                        st.rerun()
+            except Exception as exc:
+                st.warning("Lista de municípios indisponível nesta sessão.")
+                with st.expander("Detalhes da lista de cidades"):
+                    st.exception(exc)
 
         tz_mode = st.segmented_control("Fuso do horário observado", ["Brasília", "UTC"],
-                                       default="Brasília", key="fv_trend_time_zone")
+                                       default="Brasília", key="fv_trend_time_zone") or "Brasília"
 
+    state_mode = area_mode == "Estado inteiro"
     point = st.session_state.get("fv_trend_selected_point")
-    if point is None:
+    if point is None or state_mode:
         lat, lon = None, None
     else:
         lat, lon = point
-    inside = (flashes_near_point(snapshot.flashes, lat, lon, radius)
-              if snapshot is not None and point is not None else pd.DataFrame())
+    if state_mode:
+        from src.spatial_tools import filter_points_by_geometry
+        has_area = state_geom is not None
+        inside = (filter_points_by_geometry(snapshot.flashes, state_geom)
+                  if snapshot is not None and has_area else pd.DataFrame())
+    else:
+        has_area = point is not None
+        inside = (flashes_near_point(snapshot.flashes, lat, lon, radius)
+                  if snapshot is not None and has_area else pd.DataFrame())
 
     with col_map:
         map_state = st_folium(
             build_observed_map(lat, lon, radius, inside,
                                center=st.session_state["fv_trend_map_center"],
-                               zoom=st.session_state["fv_trend_map_zoom"]),
-            width=None, height=510, key="fv_trend_click_map_v5",
-            returned_objects=["last_clicked", "center", "zoom"],
+                               zoom=st.session_state["fv_trend_map_zoom"],
+                               geometry=state_geom, geometry_label=state_label or ""),
+            width=None, height=510,
+            key="fv_trend_state_map" if state_mode else "fv_trend_click_map_v5",
+            returned_objects=[] if state_mode else ["last_clicked", "center", "zoom"],
         )
-        if point is None:
+        if not has_area:
             st.info("Clique no mapa para marcar um ponto de análise, ou selecione "
                     "um município/insira coordenadas ao lado.")
+        elif state_mode:
+            st.caption(f"⚡ {len(inside)} flashes nos últimos 60 minutos em {state_label}. "
+                       "O mapa exibe até 4 mil flashes; as contagens usam todos.")
         else:
             st.caption(f"⚡ {len(inside)} flashes nos últimos 60 minutos dentro do círculo de {radius} km. "
                        "Se não houver flashes na janela disponível, o círculo ficará sem pontos.")
 
-    if map_state:
+    if map_state and not state_mode:
         view_center = map_state.get("center")
         view_zoom = map_state.get("zoom")
         if isinstance(view_center, dict) and {"lat", "lng"}.issubset(view_center):
@@ -311,18 +396,21 @@ def render_trend_tab(*, snapshot_loader=None):
 
     # Downloads científicos da área selecionada; sem imagens de terceiros.
     if snapshot is not None:
-        from src.view_exports import render_flash_png,to_jpeg
         from src.spatial_tools import circular_buffer_geometry
         # Buffer equidistante azimutal centrado no ponto, com raio em quilômetros.
-        circle = circular_buffer_geometry(lat,lon,radius) if point is not None else None
+        if state_mode:
+            export_circle = state_geom
+            applied_label = state_label or "Nenhuma área selecionada"
+        else:
+            export_circle = circular_buffer_geometry(lat,lon,radius) if point is not None else None
+            applied_label = f"Círculo de {radius} km" if point is not None else "Nenhuma área selecionada"
         # A seleção de área para o DOWNLOAD não altera o ponto analisado na Tendência.
         from src.export_area import export_area_selector
         from src.cartographic_export import BoardMeta, render_flash_board, jpeg_from_png, BASEMAPS, safe_name
-        export_circle = circle if point is not None else None
         with st.expander("Exportação",expanded=False):
             trend_area = export_area_selector(prefix="fv_trend",
                 applied_geom=export_circle,
-                applied_label=(f"Círculo de {radius} km" if point is not None else "Nenhuma área selecionada"))
+                applied_label=applied_label)
             trend_width = 1920  # resolução técnica fixa
             trend_bg = st.selectbox("Fundo da imagem",list(BASEMAPS),
                 index=list(BASEMAPS).index("satellite"),format_func=lambda s: BASEMAPS[s]["title"],key="fv_trend_export_bg")
@@ -367,8 +455,8 @@ def render_trend_tab(*, snapshot_loader=None):
             st.exception(load_error)
     elif snapshot is None:
         st.info("A leitura dos flashes GLM não está configurada.")
-    elif point is None:
-        st.info("Selecione um ponto para calcular a tendência observada e exibir os flashes na área.")
+    elif not has_area:
+        st.info("Selecione um ponto ou um estado para calcular a tendência observada e exibir os flashes na área.")
     else:
         summary = analyze_glm_activity(inside, snapshot.observation_end_utc,
                                        snapshot.latency_minutes)
@@ -379,13 +467,52 @@ def render_trend_tab(*, snapshot_loader=None):
         d_col, h_col = st.columns(2)
         d_col.metric(f"Data da observação · {tz_mode}", obs.strftime("%d/%m/%Y"))
         h_col.metric(f"Hora da observação · {tz_mode}", obs.strftime("%H:%M:%S"))
-        st.caption(f"Raio de {radius} km · {lat:.5f}°, {lon:.5f}° · "
+        area_text = state_label if state_mode else f"Raio de {radius} km · {lat:.5f}°, {lon:.5f}°"
+        st.caption(f"{area_text} · "
                    "GLM mede relâmpagos totais (intranuvem e nuvem-solo). "
                    "Tendência observacional, não previsão nem alerta oficial.")
         if not inside.empty:
             export_cols = [c for c in ("time_start", "lat", "lon", "age_minutes",
                                        "age_group", "energy_j", "area_km2") if c in inside]
+            csv_name = (f"flash_view_tendencia_{state_label.split(' ')[0]}.csv" if state_mode
+                        else "flash_view_tendencia_observada.csv")
             st.download_button("⬇️ Baixar flashes da área (CSV)",
                 inside[export_cols].to_csv(index=False).encode("utf-8-sig"),
-                file_name="flash_view_tendencia_observada.csv", mime="text/csv",
+                file_name=csv_name, mime="text/csv",
                 key="fv_download_obs")
+
+    if snapshot is not None and load_error is None:
+        st.markdown("### Panorama por estado")
+        st.caption("Flashes de cada UF nas três últimas janelas de 10 minutos, "
+                   "ordenados pela atividade mais recente. **Clique numa linha** para analisar o estado.")
+        try:
+            table = state_activity_table(
+                str(snapshot.observation_end_utc), snapshot.flashes,
+                snapshot.observation_end_utc, snapshot.latency_minutes,
+            )
+            event = st.dataframe(
+                table, hide_index=True, width="stretch", height=420,
+                on_select="rerun", selection_mode="single-row", key="fv_trend_state_table",
+                column_config={
+                    "Últimos 10 min": st.column_config.ProgressColumn(
+                        "Últimos 10 min", format="%d",
+                        max_value=int(max(1, table["Últimos 10 min"].max())),
+                    ),
+                },
+            )
+            rows = event.selection.rows if event is not None else []
+            if rows:
+                rec = table.iloc[rows[0]]
+                label = f"{rec['UF']} — {rec['Estado']}"
+                # Só reage a um clique novo; senão a linha marcada anularia o seletor de estado.
+                if label != st.session_state.get("fv_trend_table_handled"):
+                    st.session_state["fv_trend_table_handled"] = label
+                    st.session_state["fv_trend_pending_state"] = label
+                    st.toast(f"Analisando {rec['Estado']} — veja o mapa acima.")
+                    st.rerun()
+            else:
+                st.session_state.pop("fv_trend_table_handled", None)
+        except Exception as exc:
+            st.warning("Não foi possível calcular o panorama por estado.")
+            with st.expander("Detalhes técnicos"):
+                st.exception(exc)

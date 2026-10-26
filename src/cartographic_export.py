@@ -13,14 +13,14 @@ from dataclasses import dataclass
 from datetime import datetime, timezone
 from io import BytesIO
 from pathlib import Path
-from typing import Callable, Optional
+from typing import Optional
 import math
 import re
 import unicodedata
 
 import numpy as np
 import pandas as pd
-from PIL import Image, ImageDraw, ImageFont
+from PIL import Image
 from pyproj import Transformer
 from shapely.ops import transform as shapely_transform
 from shapely.geometry import shape as geojson_shape
@@ -262,7 +262,6 @@ def _stats_raster(arr, variable):
 def _utc_local(reference_utc, timezone_name):
     if reference_utc is None:
         return ''
-    from zoneinfo import ZoneInfo
     t = pd.Timestamp(reference_utc)
     t = t.tz_localize('UTC') if t.tzinfo is None else t.tz_convert('UTC')
     br = t.tz_convert(timezone_name)
@@ -374,7 +373,8 @@ def _finish(fig, ax, meta, metrics, carto_credit, width, *, legend=None, categor
 
 def render_raster_board(lat,lon,field,*,meta: BoardMeta,variable:str,
                         fixed_range:tuple[float,float],geometry=None,width=1920,
-                        unit='',background_loader=None, overlay_geojson=None):
+                        unit='',background_loader=None, overlay_geojson=None,
+                        cmap_name='turbo'):
     """Prancha raster; dados já processados e mascarados no dashboard.
 
     Os zeros permanecem zeros; ausência de pixels válidos é explicitada.
@@ -393,7 +393,7 @@ def render_raster_board(lat,lon,field,*,meta: BoardMeta,variable:str,
     xx,yy=np.meshgrid(lon,lat)
     mx,my=WGS_TO_WEB.transform(xx,yy)
     # Matriz NaN é transparente; não recorta o mapa-base.
-    cmap=plt.colormaps['turbo'].copy();cmap.set_bad((1,1,1,0))
+    cmap=plt.colormaps[cmap_name].copy();cmap.set_bad((1,1,1,0))
     if geometry is not None:
         from shapely import contains_xy
         field = np.where(contains_xy(geometry,xx,yy),field,np.nan)

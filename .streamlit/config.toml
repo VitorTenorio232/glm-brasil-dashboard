@@ -6,4 +6,11 @@ secondaryBackgroundColor = "#f4f8fb"
 textColor = "#172536"
 
 [server]
-maxUploadSize = 500
+# Uploads de SHP/KMZ/KML/GeoJSON são limitados a 20 MB em src/map_uploads.py.
+maxUploadSize = 25
+
+[client]
+toolbarMode = "minimal"
+
+[browser]
+gatherUsageStats = false

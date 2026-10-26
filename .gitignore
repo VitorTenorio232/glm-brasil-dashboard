@@ -1,55 +1,48 @@
-.venv/
-__pycache__/
-*.py[cod]
-.pytest_cache/
-.streamlit/secrets.toml
-*.json
-.env
-.DS_Store
-# Dados reais GLM são grandes
-data/raw/*.nc
-data/processed/*.parquet
-data/processed/*.csv
-# Preserve a demo pequena
-!data/demo/**
-_backup_antes_lume_*/
 # ============================================================
-# Python
+# Python / ambientes
+# ============================================================
+.venv/
 venv/
 env/
+__pycache__/
+*.py[cod]
 *$py.class
+.pytest_cache/
 .mypy_cache/
 .ruff_cache/
 .coverage
 htmlcov/
-
-# Jupyter
 .ipynb_checkpoints/
-# VS Code / IDEs
+
+# IDEs / sistema operacional
 .vscode/
 .idea/
-# Sistema operacional
+.claude/
+.DS_Store
 Thumbs.db
 *~
-# Streamlit / credenciais
-# Mantém arquivos de exemplo
-!.streamlit/secrets.toml.example
-!.streamlit/config.toml
-# Variáveis de ambiente / segredos
+
+# ============================================================
+# Credenciais — mantém apenas os arquivos de exemplo
+# ============================================================
+.streamlit/secrets.toml
+.env
 .env.*
 !.env.example
 *.pem
 *.key
 credentials.json
 service-account*.json
-# DADOS GLM
-# Nunca versionar os dados brutos/processados
+
+# ============================================================
+# Dados GLM (ficam no Hugging Face, nunca no GitHub)
+# ============================================================
 data/raw/
 data/processed/
 data/flashes/
-# Malhas geográficas geradas
 data/municipalities/
-# Grandes formatos científicos/geoespaciais
+data/demo/raw/
+GLM_Process/
 *.nc
 *.nc4
 *.h5
@@ -65,39 +58,25 @@ data/municipalities/
 *.dbf
 *.prj
 *.cpg
-*.qmd
-# GeoJSON pode ficar gigantesco
-*.geojson
-# DuckDB / bancos locais
 *.duckdb
 *.db
 *.sqlite
 *.sqlite3
-# Logs e temporários
+
+# GeoJSON pode ficar gigantesco; os pequenos usados pelo site são liberados.
+*.geojson
+!data/admin/*.geojson
+!data/demo/*.geojson
+
+# ============================================================
+# Logs, temporários, builds e backups
+# ============================================================
 *.log
 logs/
 tmp/
 temp/
-# Builds / arquivos compactados gerados
+*.part
 dist/
 build/
 *.egg-info/
-# ARQUIVOS NECESSÁRIOS
-!data/processed/
-data/processed/*
-!data/processed/flashes_enriched.parquet
-!data/municipalities/
-data/municipalities/*
-!data/municipalities/municipios_brasil_web.geojson
-_backup_flash_view_*/
-GLM_Process/
-_backup_hf_private_*/
-_backup_daily_*/
-_backup_mapa_*/
-# Flash View - dados e credenciais
-*.pyc
 _backup_*/
-*.part
-
-# Dados NetCDF antigos de demonstração
-data/demo/raw/

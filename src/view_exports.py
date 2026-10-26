@@ -6,7 +6,7 @@ Mapas exportados são reprojeções simplificadas de coordenadas geográficas
 from __future__ import annotations
 
 from io import BytesIO
-from datetime import datetime, timedelta, timezone
+from datetime import datetime
 
 import numpy as np
 import pandas as pd
@@ -118,7 +118,7 @@ def render_flash_png(flashes: pd.DataFrame, *, title='Flash View | GLM',
              color='#9fb3c8',fontsize=8)
     handles,labels=ax.get_legend_handles_labels()
     if handles:
-        leg=ax.legend(loc='upper right',facecolor='#15263a',edgecolor='#45576e',labelcolor='white',fontsize=9)
+        ax.legend(loc='upper right',facecolor='#15263a',edgecolor='#45576e',labelcolor='white',fontsize=9)
     fig.subplots_adjust(left=.075,right=.975,top=.89,bottom=.10)
     buf=BytesIO();fig.savefig(buf,format='png',dpi=dpi,facecolor=fig.get_facecolor());plt.close(fig)
     return buf.getvalue()

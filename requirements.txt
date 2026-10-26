@@ -21,6 +21,8 @@ shapely>=2.0
 pyogrio>=0.10
 pyproj>=3.7
 geobr==1.0.0
+# geobr 1.0.0 usa Relation.fetchone(), removido no duckdb 2.0 (quebra Estado/Município).
+duckdb>=1.1,<2
 pyarrow>=18
 huggingface_hub>=0.28
 

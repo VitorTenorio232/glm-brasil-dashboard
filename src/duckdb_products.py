@@ -80,7 +80,7 @@ def build_duckdb_products(parquet_glob: str, out_dir: str | Path):
       COUNT(DISTINCT year) n_years FROM monthly GROUP BY ALL""")
     mclim_path = (out_dir / "monthly_climatology.parquet").as_posix().replace("\'", "\'\'")
     con.execute(f"CREATE OR REPLACE VIEW mclim AS SELECT * FROM read_parquet('{mclim_path}')")
-    copy("monthly_anomalies",f"""SELECT m.*,c.flash_count_mean,c.flash_count_std,c.flash_density_km2_mean,c.flash_density_km2_std,
+    copy("monthly_anomalies","""SELECT m.*,c.flash_count_mean,c.flash_count_std,c.flash_density_km2_mean,c.flash_density_km2_std,
       m.flash_count-c.flash_count_mean flash_count_anom,
       100.0*(m.flash_count-c.flash_count_mean)/NULLIF(c.flash_count_mean,0) flash_count_anom_pct,
       (m.flash_count-c.flash_count_mean)/NULLIF(c.flash_count_std,0) flash_count_z,
@@ -92,7 +92,7 @@ def build_duckdb_products(parquet_glob: str, out_dir: str | Path):
       AVG(flash_count) flash_count_mean, MEDIAN(flash_count) flash_count_median, STDDEV_SAMP(flash_count) flash_count_std,
       AVG(flash_density_km2) flash_density_km2_mean, MEDIAN(flash_density_km2) flash_density_km2_median, STDDEV_SAMP(flash_density_km2) flash_density_km2_std,
       AVG(lightning_days) lightning_days_mean, COUNT(DISTINCT year) n_years FROM annual GROUP BY ALL""")
-    copy("records",f"""WITH rd AS (SELECT *,ROW_NUMBER() OVER(PARTITION BY code_muni ORDER BY flash_count DESC,date) rn FROM daily),
+    copy("records","""WITH rd AS (SELECT *,ROW_NUMBER() OVER(PARTITION BY code_muni ORDER BY flash_count DESC,date) rn FROM daily),
       rh AS (SELECT *,ROW_NUMBER() OVER(PARTITION BY code_muni ORDER BY flash_count DESC,date,hour) rn FROM hourly)
       SELECT rd.code_muni,rd.name_muni,rd.abbrev_state,rd.flash_count record_daily_flashes,rd.date record_daily_date,
       rh.flash_count record_hourly_flashes,rh.date record_hourly_date,rh.hour record_hourly_hour

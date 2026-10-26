@@ -5,7 +5,6 @@ from datetime import datetime
 from functools import lru_cache
 from pathlib import Path, PurePosixPath
 import calendar
-import math
 import os
 import re
 from typing import Iterable
@@ -353,7 +352,6 @@ class HistoricalGLMRepository:
                 raise ValueError("As grades dos arquivos históricos não são idênticas.")
 
             finite_count = np.isfinite(count)
-            count_safe = np.where(finite_count, count, 0.0)
 
             if variable == "flash_count":
                 finite = np.isfinite(data)
@@ -678,6 +676,19 @@ def _axis_cell_edges(values: np.ndarray) -> tuple[float, float]:
     return float(np.nanmin(values) - half), float(np.nanmax(values) + half)
 
 
+ANOMALY_CMAP = "RdBu_r"
+
+
+def anomaly_range(data: np.ndarray) -> tuple[float, float]:
+    """Escala simétrica em torno de zero (percentil 98 do módulo)."""
+    valid = np.abs(np.asarray(data, dtype=float))
+    valid = valid[np.isfinite(valid)]
+    span = float(np.nanpercentile(valid, 98)) if valid.size else 0.0
+    if not np.isfinite(span) or span <= 0:
+        span = float(valid.max()) if valid.size and valid.max() > 0 else 1.0
+    return -span, span
+
+
 def _robust_range(data: np.ndarray, variable: str):
     valid = data[np.isfinite(data)]
     if variable == "flash_count":
@@ -706,6 +717,7 @@ def _rgba_clipped_to_country(
     cmap,
     clip_geometry=None,
     oversample: int = 1,
+    hide_nonpositive: bool | None = None,
 ) -> np.ndarray:
     """Converte o campo em RGBA e, opcionalmente, mascara fora da geometria.
 
@@ -719,7 +731,9 @@ def _rgba_clipped_to_country(
     rgba = (cmap(np.nan_to_num(normalized, nan=0.0)) * 255).astype(np.uint8)
 
     visible = np.isfinite(data)
-    if variable == "flash_count":
+    if hide_nonpositive is None:
+        hide_nonpositive = variable == "flash_count"
+    if hide_nonpositive:
         visible &= data > 0
 
     if clip_geometry is not None:
@@ -804,7 +818,13 @@ def build_historical_map(
     boundary_name: str = "Limite selecionado",
     mask_to_geometry: bool = True,
     display_range: tuple[float, float] | None = None,
+    anomaly: bool = False,
 ):
+    """Mapa Folium do campo GLM.
+
+    ``anomaly=True`` usa escala divergente (azul = abaixo da média, vermelho = acima)
+    e mantém valores negativos e zero visíveis.
+    """
     import folium
     from branca.colormap import LinearColormap
     from folium.plugins import Fullscreen
@@ -816,9 +836,14 @@ def build_historical_map(
 
     # Por padrão ainda existe fallback automático, mas o Flash View público passa
     # display_range fixo por variável/escala para permitir comparação entre mapas.
-    vmin, vmax = display_range if display_range is not None else _robust_range(data, variable)
+    if display_range is not None:
+        vmin, vmax = display_range
+    elif anomaly:
+        vmin, vmax = anomaly_range(data)
+    else:
+        vmin, vmax = _robust_range(data, variable)
 
-    cmap = matplotlib.colormaps["turbo"]
+    cmap = matplotlib.colormaps[ANOMALY_CMAP if anomaly else "turbo"]
     rgba = _rgba_clipped_to_country(
         data,
         lat,
@@ -829,6 +854,7 @@ def build_historical_map(
         cmap=cmap,
         clip_geometry=clip_geometry if mask_to_geometry else None,
         oversample=1,
+        hide_nonpositive=False if anomaly else None,
     )
 
     # IMPORTANTe: lat/lon do NetCDF são centros de células. Para o ImageOverlay,
@@ -927,7 +953,8 @@ def build_historical_map(
     ]
     unit = VARIABLES[variable]["map_unit"]
     colorbar = LinearColormap(colors=colors, vmin=vmin, vmax=vmax)
-    colorbar.caption = f"{VARIABLES[variable]['label']} ({unit})"
+    prefix = "Anomalia — " if anomaly else ""
+    colorbar.caption = f"{prefix}{VARIABLES[variable]['label']} ({unit})"
     colorbar.add_to(m)
 
     if clip_geometry is not None:

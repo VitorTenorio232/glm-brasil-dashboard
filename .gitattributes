@@ -1,0 +1,6 @@
+# Fim de linha padronizado (LF) para evitar diffs falsos entre Windows e Linux.
+* text=auto eol=lf
+*.bat text eol=crlf
+*.ico binary
+*.png binary
+*.jpg binary

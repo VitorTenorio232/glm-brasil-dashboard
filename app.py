@@ -17,10 +17,11 @@ from streamlit_folium import st_folium
 
 from src.realtime_glm import AGE_GROUPS, fetch_live_snapshot, group_counts
 from src.maplibre_realtime import flash_payload, show_realtime_map
-from src.alertas_flash import analyze_glm_activity
 from src.previsao_flash import render_trend_tab
 from src.historical_glm import (
+    ANOMALY_CMAP,
     MONTH_NAMES_PT,
+    anomaly_range,
     VARIABLES,
     HISTORICAL_MAX_DATE,
     HistoricalGLMRepository,
@@ -48,13 +49,13 @@ from src.spatial_tools import (
 from src.ranking_glm import RankingRepository, rank_dataframe
 from src.map_uploads import load_user_overlay
 from src.view_exports import (
-    to_jpeg, time_window_frame, render_flash_png, render_glm_gif, render_ranking_png
+    to_jpeg, render_ranking_png
 )
 
 
 from src.cartographic_export import (
     BoardMeta, render_raster_board, render_flash_board, render_image_board,
-    jpeg_from_png, safe_name, BasemapUnavailable,
+    jpeg_from_png, safe_name,
 )
 
 from src.export_area import export_area_selector, ExportArea
@@ -82,180 +83,85 @@ st.set_page_config(
 st.markdown(
     """
     <style>
+    /* Flash View — tema claro único (antes havia dois blocos que se sobrescreviam). */
     [data-testid="stSidebar"],
-    [data-testid="stSidebarCollapsedControl"] {
-        display: none !important;
-    }
+    [data-testid="stSidebarCollapsedControl"] { display: none !important; }
 
-    .block-container {
-        max-width: 1550px;
-        padding-top: 1.15rem;
-        padding-bottom: 2.5rem;
-    }
-
-    .fv-header {
-        padding: 1.15rem 1.4rem 1.2rem 1.4rem;
-        margin-bottom: 0.9rem;
-        text-align: center;
-        border: 1px solid #e2e8f0;
-        border-radius: 18px;
-        background: linear-gradient(135deg, rgba(255,255,255,.96), rgba(241,245,249,.94));
-        box-shadow: 0 8px 24px rgba(15, 23, 42, 0.07);
-    }
-    .fv-title {
-        margin: 0;
-        font-size: 2.55rem;
-        line-height: 1.05;
-        font-weight: 820;
-        letter-spacing: -0.045rem;
-        color: #0f172a;
-        text-align: center;
-    }
-    .fv-subtitle {
-        margin-top: 0.45rem;
-        color: #64748b;
-        font-size: 1.02rem;
-        text-align: center;
-    }
-
-    .metric-card {
-        background: #ffffff;
-        border: 1px solid #e6eaf0;
-        border-radius: 14px;
-        padding: 18px 20px 17px 20px;
-        min-height: 118px;
-        box-shadow: 0 4px 15px rgba(15, 23, 42, 0.07);
-        text-align: center;
-    }
-    .metric-card-label {
-        text-align: center;
-        color: #64748b;
-        font-size: 0.88rem;
-        font-weight: 600;
-        margin-bottom: 10px;
-    }
-    .metric-card-value {
-        text-align: center;
-        color: #0f172a;
-        font-size: 1.82rem;
-        line-height: 1.08;
-        font-weight: 730;
-        white-space: normal;
-    }
-    .metric-card-small {
-        text-align: center;
-        color: #94a3b8;
-        font-size: 0.76rem;
-        margin-top: 8px;
-    }
-
-    .time-card {
-        background: #ffffff;
-        border: 1px solid #e6eaf0;
-        border-radius: 13px;
-        padding: 16px 18px 17px 18px;
-        min-height: 106px;
-        box-shadow: 0 3px 12px rgba(15, 23, 42, 0.06);
-        border-top: 5px solid var(--accent);
-    }
-    .time-card-header {
-        display: flex;
-        align-items: center;
-        gap: 8px;
-        font-size: 0.92rem;
-        font-weight: 650;
-        color: #334155;
-    }
-    .time-dot {
-        width: 11px;
-        height: 11px;
-        border-radius: 50%;
-        background: var(--accent);
-        flex: 0 0 11px;
-    }
-    .time-card-value {
-        margin-top: 10px;
-        color: #0f172a;
-        font-size: 1.8rem;
-        line-height: 1;
-        font-weight: 750;
-    }
-
-    .section-heading {
-        text-align: center;
-        margin-top: 0.35rem;
-        margin-bottom: 0.75rem;
-        color: #0f172a;
-        font-size: 1.35rem;
-        font-weight: 750;
-    }
-
-    .info-panel {
-        padding: 17px 19px;
-        border: 1px solid #e2e8f0;
-        background: #f8fafc;
-        border-radius: 12px;
-        color: #475569;
-        margin: 0.4rem 0 1rem 0;
-    }
-    .info-panel strong { color: #0f172a; }
-
-    button[data-baseweb="tab"] p {
-        font-size: 1rem;
-        font-weight: 650;
-    }
-    div[data-testid="stHorizontalBlock"] { gap: 0.85rem; }
-    div[data-baseweb="tab-list"] { justify-content: center; gap: 0.45rem; }
-    div[data-testid="stButton"] button,
-    div[data-testid="stDownloadButton"] button {
-        border-radius: 10px;
-        font-weight: 650;
-        min-height: 2.65rem;
-    }
-    .fv-action-panel {
-        border: 1px solid #e2e8f0;
-        border-radius: 14px;
-        background: #f8fafc;
-        padding: 0.85rem 1rem;
-        margin: 0.55rem 0 0.9rem 0;
-    }
-    
-    /* Flash View V9.1 | identidade CLARA e contraste legível. */
     .stApp, [data-testid="stAppViewContainer"], [data-testid="stMain"] {
         background: #ffffff !important; color: #172536 !important;
     }
-    .block-container {max-width:1900px;padding:0.55rem 1.3rem 2rem;}
-    .fv-header {background:linear-gradient(120deg,#ffffff,#f1f7fa);color:#13283a;
-        border:1px solid #dbe6ec;border-radius:13px;box-shadow:0 4px 17px rgba(13,37,54,.055);
-        text-align:left;padding:0.75rem 1.2rem;margin:0 0 0.55rem;}
-    .fv-title {font-size:1.7rem;color:#102b40;text-align:left;letter-spacing:-0.02em;}
-    .fv-subtitle {font-size:0.85rem;margin-top:0.2rem;color:#475f72;text-align:left;}
-    .metric-card,.time-card {background:#fff;border:1px solid #dbe5ee;
-        box-shadow:0 3px 14px rgba(20,43,61,.06);min-height:96px;padding:12px 15px;}
-    .metric-card-label,.time-card-header {color:#43566c;}
-    .metric-card-value,.time-card-value {color:#102436;font-size:1.45rem;}
-    .metric-card-small {color:#536c80;}
-    .section-heading {color:#112c43;text-align:left;margin-top:.65rem;font-size:1.17rem;}
-    .info-panel,.fv-action-panel {background:#f6f9fb;border-color:#dbe7ed;color:#263e50;}
-    .info-panel strong {color:#132d42;}
-    .fv-ops-strip {display:flex;align-items:center;justify-content:space-between;flex-wrap:wrap;gap:9px;
-        background:#f7fafc;border:1px solid #dae5ea;color:#1d394f;padding:10px 14px;
-        border-radius:10px;margin-bottom:10px;font-size:12px;}
-    .fv-ops-pill {display:inline-block;background:#e8f5fa;color:#096685;border:1px solid #add9e7;
-        padding:4px 8px;border-radius:8px;font-weight:750;letter-spacing:.02em;}
-    .fv-ops-main {font-weight:800;font-size:13px;letter-spacing:.06em;color:#15364b;}
-    .fv-ops-muted {color:#586f80;}
-    .fv-timeline-title {background:#f6f9fc;border:1px solid #dbe6ee;border-radius:10px;
-        color:#243c51;padding:9px 12px;margin-top:8px;}
-    button[data-baseweb="tab"] {border-radius:7px 7px 0 0;}
-    div[data-baseweb="tab-list"] {justify-content:flex-start;gap:.20rem;}
-    button[data-baseweb="tab"] p {font-size:.91rem;color:#1c3448;}
-    div[data-testid="stExpander"] {background:#fafcfe;border-radius:10px;}
-    [data-testid="stMetricValue"], [data-testid="stMetricLabel"] {color:#173249;}
+    .block-container { max-width: 1900px; padding: 0.55rem 1.3rem 2rem; }
+
+    /* Cabeçalho */
+    .fv-header {
+        display: flex; align-items: center; justify-content: space-between; gap: 1rem; flex-wrap: wrap;
+        background: linear-gradient(120deg, #ffffff, #f1f7fa); color: #13283a;
+        border: 1px solid #dbe6ec; border-radius: 13px; box-shadow: 0 4px 17px rgba(13,37,54,.055);
+        padding: 0.75rem 1.2rem; margin: 0 0 0.55rem;
+    }
+    .fv-title {
+        margin: 0; font-size: 1.7rem; line-height: 1.05; font-weight: 820;
+        letter-spacing: -0.02em; color: #102b40;
+    }
+    .fv-title small { font-size: 0.65rem; color: #087fa3; font-weight: 650; letter-spacing: .1em; }
+    .fv-subtitle { font-size: 0.85rem; margin-top: 0.2rem; color: #475f72; }
+    .fv-header-note { font-size: 0.8rem; color: #475f72; max-width: 520px; line-height: 1.35; }
+    .fv-header-note b { color: #102b40; }
+
+    /* Cartões */
+    .metric-card, .time-card {
+        background: #fff; border: 1px solid #dbe5ee; border-radius: 13px;
+        box-shadow: 0 3px 14px rgba(20,43,61,.06); min-height: 96px; padding: 12px 15px;
+    }
+    .metric-card { text-align: center; }
+    .metric-card-label { color: #43566c; font-size: 0.88rem; font-weight: 600; margin-bottom: 8px; }
+    .metric-card-value { color: #102436; font-size: 1.45rem; line-height: 1.08; font-weight: 730; }
+    .metric-card-small { color: #536c80; font-size: 0.76rem; margin-top: 8px; }
+    .time-card { border-top: 5px solid var(--accent); }
+    .time-card-header { display: flex; align-items: center; gap: 8px; font-size: 0.92rem; font-weight: 650; color: #43566c; }
+    .time-dot { width: 11px; height: 11px; border-radius: 50%; background: var(--accent); flex: 0 0 11px; }
+    .time-card-value { margin-top: 10px; color: #102436; font-size: 1.45rem; line-height: 1; font-weight: 750; }
+
+    .section-heading { color: #112c43; margin: .65rem 0 .75rem; font-size: 1.17rem; font-weight: 750; }
+
+    /* Faixa operacional da aba ao vivo */
+    .fv-ops-strip {
+        display: flex; align-items: center; justify-content: space-between; flex-wrap: wrap; gap: 9px;
+        background: #f7fafc; border: 1px solid #dae5ea; color: #1d394f; padding: 10px 14px;
+        border-radius: 10px; margin-bottom: 10px; font-size: 12px;
+    }
+    .fv-ops-pill {
+        display: inline-block; background: #e8f5fa; color: #096685; border: 1px solid #add9e7;
+        padding: 4px 8px; border-radius: 8px; font-weight: 750; letter-spacing: .02em;
+    }
+    .fv-ops-main { font-weight: 800; font-size: 13px; letter-spacing: .06em; color: #15364b; }
+    .fv-ops-muted { color: #586f80; }
+
+    /* Abas, botões e componentes do Streamlit */
+    div[data-baseweb="tab-list"] { justify-content: flex-start; gap: .2rem; overflow-x: auto; scrollbar-width: thin; }
+    button[data-baseweb="tab"] { border-radius: 7px 7px 0 0; }
+    button[data-baseweb="tab"] p { font-size: .95rem; font-weight: 650; color: #1c3448; white-space: nowrap; }
+    div[data-testid="stHorizontalBlock"] { gap: 0.85rem; }
+    div[data-testid="stButton"] button,
+    div[data-testid="stDownloadButton"] button { border-radius: 10px; font-weight: 650; min-height: 2.65rem; }
+    div[data-testid="stExpander"] { background: #fafcfe; border-radius: 10px; }
+    [data-testid="stMetricValue"], [data-testid="stMetricLabel"] { color: #173249; }
+    [data-testid="stMetricValue"] { font-size: 1.6rem; white-space: normal; }
     [data-testid="stWidgetLabel"] p, [data-testid="stMarkdownContainer"] p,
-    [data-testid="stMarkdownContainer"] li {color:#223b4d;}
-    [data-testid="stCaptionContainer"] p {color:#556f81;}
-    input,textarea {color:#1b2b3d !important;}
+    [data-testid="stMarkdownContainer"] li { color: #223b4d; }
+    [data-testid="stCaptionContainer"] p { color: #556f81; }
+    /* A regra de <p> acima deixava o texto dos botões primários quase invisível. */
+    button[kind="primary"] p, button[data-testid="stBaseButton-primary"] p { color: #ffffff !important; }
+    input, textarea { color: #1b2b3d !important; }
+
+    /* Celular */
+    @media (max-width: 700px) {
+        .block-container { padding: 0.4rem 0.7rem 1.5rem; }
+        .fv-title { font-size: 1.35rem; }
+        .metric-card-value, .time-card-value { font-size: 1.2rem; }
+        .metric-card, .time-card { min-height: 0; }
+        .fv-header-note { display: none; }
+    }
     </style>
     """,
     unsafe_allow_html=True,
@@ -287,21 +193,31 @@ def _series_figure_png(
     scale: str,
     variable: str,
     location_label: str,
+    compare: pd.DataFrame | None = None,
+    compare_label: str | None = None,
 ) -> bytes:
     """Gera uma versão PNG da série exibida no painel, sem depender de Kaleido."""
     import matplotlib.pyplot as plt
 
     fig, ax = plt.subplots(figsize=(12, 6), dpi=160)
-    values = pd.to_numeric(data["value"], errors="coerce").to_numpy(dtype=float)
+    curves = [(data, location_label)]
+    if compare is not None and not compare.empty:
+        curves.append((compare, compare_label or "Segunda área"))
 
+    for frame, label in curves:
+        values = pd.to_numeric(frame["value"], errors="coerce").to_numpy(dtype=float)
+        if scale in {"daily", "monthly"}:
+            x = pd.to_datetime(frame["date"])
+            ax.plot(x, values, marker="o", linewidth=1.6, markersize=3.8, label=label)
+        else:
+            x = frame["year"].astype(int).to_numpy()
+            ax.plot(x, values, marker="o", linewidth=1.8, markersize=5, label=label)
+            ax.set_xticks(x)
     if scale in {"daily", "monthly"}:
-        x = pd.to_datetime(data["date"])
-        ax.plot(x, values, marker="o", linewidth=1.6, markersize=3.8)
         fig.autofmt_xdate()
-    else:
-        x = data["year"].astype(int).to_numpy()
-        ax.plot(x, values, marker="o", linewidth=1.8, markersize=5)
-        ax.set_xticks(x)
+    if len(curves) > 1:
+        ax.legend()
+        location_label = f"{location_label} × {curves[1][1]}"
 
     ax.set_title(f"{VARIABLES[variable]['label']} — {location_label}")
     ax.set_xlabel("Período")
@@ -315,6 +231,20 @@ def _series_figure_png(
     fig.savefig(buffer, format="png", dpi=200, bbox_inches="tight")
     plt.close(fig)
     return buffer.getvalue()
+
+
+def _style_figure(fig: go.Figure) -> go.Figure:
+    """Tema claro do site aplicado aos gráficos Plotly."""
+    fig.update_layout(
+        template="plotly_white",
+        paper_bgcolor="#ffffff",
+        plot_bgcolor="#ffffff",
+        font=dict(color="#172536", family="Source Sans Pro, sans-serif"),
+        colorway=["#087fa3", "#e8590c", "#2f9e44", "#7048e8"],
+    )
+    fig.update_xaxes(gridcolor="#e3ebf1", linecolor="#cfdbe4")
+    fig.update_yaxes(gridcolor="#e3ebf1", linecolor="#cfdbe4")
+    return fig
 
 
 def _card(label: str, value: str, small: str = "") -> None:
@@ -376,7 +306,8 @@ def _hf_token_available() -> bool:
     return bool(_secret("HF_TOKEN") or os.getenv("HF_TOKEN"))
 
 
-@st.cache_resource(show_spinner=False)
+# TTL: arquivos novos enviados ao Hugging Face (ex.: 2023) aparecem sem reiniciar o app.
+@st.cache_resource(ttl="6h", show_spinner=False)
 def _get_repo(config: SourceConfig) -> HistoricalGLMRepository:
     repo = HistoricalGLMRepository(config)
     repo.scan()
@@ -687,9 +618,15 @@ def _series_csv_bytes(data: pd.DataFrame) -> bytes:
 st.markdown(
     """
     <div class="fv-header">
-        <h1 class="fv-title">⚡ Flash View <span style="font-size:0.65rem;color:#42bff5;font-weight:600;letter-spacing:.1em">SALA DE MONITORAMENTO</span></h1>
-        <div class="fv-subtitle">
-            Relâmpagos totais • GOES-19 / NOAA • Monitoramento, evolução horária e análise geográfica
+        <div>
+            <h1 class="fv-title">⚡ Flash View <small>SALA DE MONITORAMENTO</small></h1>
+            <div class="fv-subtitle">
+                Relâmpagos totais • GOES-19 / NOAA • Monitoramento, evolução horária e análise geográfica
+            </div>
+        </div>
+        <div class="fv-header-note">
+            <b>O que é um flash?</b> É um relâmpago completo detectado do espaço pelo sensor GLM do
+            satélite GOES-19 — inclui raios dentro das nuvens e os que tocam o solo.
         </div>
     </div>
     """,
@@ -732,8 +669,8 @@ def _live_panel():
     action_text, action_refresh, action_select = st.columns([0.68, 0.16, 0.16])
     with action_text:
         st.caption(
-            "GLM-L2-LCFA • visualização: 30 min por quadro • animação: última hora, passos de 5 min. "
-            "Fonte consultada aproximadamente a cada 60 segundos."
+            "Atualiza sozinho a cada ~60 s. O mapa mostra os últimos 30 min; "
+            "use **▶ Reproduzir** para ver a última hora em passos de 5 min."
         )
     with action_refresh:
         if st.button("🔄 Atualizar agora", width="stretch", key="refresh_live"):
@@ -756,39 +693,6 @@ def _live_panel():
         with st.expander("Detalhes técnicos"):
             st.exception(exc)
         return
-
-    # ==================== Camadas SHP/KMZ/KML/GeoJSON ====================
-    with st.expander("🗺️ Área personalizada · importar SHP/KMZ/KML/GeoJSON", expanded=False):
-        st.caption("Shapefile: envie um ZIP com .shp, .shx, .dbf e .prj. "
-                   "Aceita também KMZ, KML e GeoJSON (até 20 MB). "
-                   "O arquivo fica somente na sua sessão; não é enviado ao GitHub/HF.")
-        if st.button("✖ Remover camada importada", key="fv_overlay_reset"):
-            st.session_state.pop("fv_user_geojson", None)
-            st.session_state.pop("fv_user_polygon_wkb", None)
-            st.session_state.pop("fv_uploaded_digest", None)
-            st.session_state["fv_upload_version"] = int(st.session_state.get("fv_upload_version", 0))+1
-            st.rerun(scope="fragment")
-        uploaded = st.file_uploader(
-            "Escolha a geometria", type=["zip", "kmz", "kml", "geojson", "json"],
-            key=f"fv_geo_upload_{st.session_state.get('fv_upload_version',0)}"
-        )
-        if uploaded is not None:
-            import hashlib
-            blob = uploaded.getvalue()
-            digest = hashlib.sha256(blob).hexdigest()
-            if digest != st.session_state.get("fv_uploaded_digest"):
-                try:
-                    geojson, polygon, nfeat = load_user_overlay(uploaded.name, blob)
-                    st.session_state["fv_user_geojson"] = geojson
-                    st.session_state["fv_user_polygon_wkb"] = polygon.wkb.hex() if polygon is not None else None
-                    st.session_state["fv_uploaded_digest"] = digest
-                    st.success(f"Camada carregada: {nfeat} feição(ões).")
-                except Exception as exc:
-                    st.error(f"Não foi possível ler a geometria: {exc}")
-        if st.session_state.get("fv_user_geojson"):
-            st.success(f"Camada geográfica ativa ({len(st.session_state['fv_user_geojson']['features'])} feições).")
-            st.checkbox("Filtrar as contagens pelo polígono importado", value=True,
-                        key="fv_filter_uploaded_polygon")
 
     selected_geometry = None
     # Área desenhada tem preferência; em seguida, polígono importado.
@@ -816,31 +720,29 @@ def _live_panel():
     )
     counts = group_counts(display_flashes)
 
-    window_start_local = _local_time(snapshot.window_start_utc)
-    observation_end_local = _local_time(snapshot.observation_end_utc)
-
-    # Exibe data e hora separadamente, com fuso selecionável pelo usuário.
-    c1, c2 = st.columns(2)
-    with c1:
-        small = ("Área selecionada · janela móvel de 30 minutos"
-                 if selected_geometry is not None else "Janela móvel de 30 minutos")
-        _card("Flashes", _fmt_int(len(display_flashes)), small)
-    with c2:
-        _card("Satélite", "GOES-19", "Geostationary Lightning Mapper")
-
     tz_mode = st.segmented_control(
-        "Exibir horário da observação em", ["Brasília", "UTC"],
+        "Horário em", ["Brasília", "UTC"],
         default="Brasília", key="fv_live_time_zone"
-    )
+    ) or "Brasília"
     chosen_tz = LOCAL_TIMEZONE if tz_mode == "Brasília" else ZoneInfo("UTC")
     observed = snapshot.observation_end_utc.astimezone(chosen_tz)
     window_start = snapshot.window_start_utc.astimezone(chosen_tz)
-    date_col, time_col = st.columns(2)
-    with date_col:
+
+    # Uma linha com os números principais; o mapa vem logo abaixo.
+    c1, c2, c3, c4 = st.columns(4)
+    with c1:
+        small = ("Área selecionada · últimos 30 min"
+                 if selected_geometry is not None else "Últimos 30 minutos")
+        _card("Flashes", _fmt_int(len(display_flashes)), small)
+    with c2:
         _card(f"Data · {tz_mode}", observed.strftime("%d/%m/%Y"), "Último dado GLM")
-    with time_col:
+    with c3:
         _card(f"Hora · {tz_mode}", observed.strftime("%H:%M:%S"),
               "UTC±00:00" if tz_mode == "UTC" else "UTC−03:00")
+    with c4:
+        latency = snapshot.latency_minutes
+        _card("Atraso da fonte", f"{latency:.0f} min" if latency >= 1 else "< 1 min",
+              "Normal: até ~2 min" if latency <= 10 else "Acima do normal")
 
     st.caption(f"Janela disponível ({tz_mode}): "
                f"{window_start:%d/%m/%Y %H:%M:%S} → "
@@ -898,9 +800,6 @@ def _live_panel():
         except (TypeError, ValueError, KeyError):
             st.warning("Não foi possível interpretar o retângulo selecionado.")
 
-    st.caption("Mapa MapLibre: centro e zoom são mantidos no navegador. "
-               "Os controles da última hora operam sem executar novamente o Python.")
-
     st.markdown('<div class="section-heading">Atividade por faixa temporal</div>', unsafe_allow_html=True)
     cols = st.columns(4)
     for col, (label, _, _, color) in zip(cols, AGE_GROUPS):
@@ -911,6 +810,41 @@ def _live_panel():
         "As faixas de tempo são calculadas a partir do horário do dado GLM mais recente disponível. "
         "Os pontos representam centroides dos flashes identificados no produto GLM-L2-LCFA."
     )
+
+    # ==================== Camadas SHP/KMZ/KML/GeoJSON ====================
+    # Fica abaixo do mapa; após um upload o fragmento é refeito para aplicar o filtro.
+    with st.expander("🗺️ Importar área (SHP/KMZ/KML/GeoJSON)", expanded=False):
+        st.caption("Shapefile: envie um ZIP com .shp, .shx, .dbf e .prj. "
+                   "Aceita também KMZ, KML e GeoJSON (até 20 MB). "
+                   "O arquivo fica somente na sua sessão; não é enviado ao GitHub/HF.")
+        if st.session_state.get("fv_user_geojson"):
+            st.success(f"Camada geográfica ativa ({len(st.session_state['fv_user_geojson']['features'])} feições).")
+            st.checkbox("Filtrar as contagens pelo polígono importado", value=True,
+                        key="fv_filter_uploaded_polygon")
+            if st.button("✖ Remover camada importada", key="fv_overlay_reset"):
+                st.session_state.pop("fv_user_geojson", None)
+                st.session_state.pop("fv_user_polygon_wkb", None)
+                st.session_state.pop("fv_uploaded_digest", None)
+                st.session_state["fv_upload_version"] = int(st.session_state.get("fv_upload_version", 0))+1
+                st.rerun(scope="fragment")
+        uploaded = st.file_uploader(
+            "Escolha a geometria", type=["zip", "kmz", "kml", "geojson", "json"],
+            key=f"fv_geo_upload_{st.session_state.get('fv_upload_version',0)}"
+        )
+        if uploaded is not None:
+            import hashlib
+            blob = uploaded.getvalue()
+            digest = hashlib.sha256(blob).hexdigest()
+            if digest != st.session_state.get("fv_uploaded_digest"):
+                try:
+                    geojson, polygon, nfeat = load_user_overlay(uploaded.name, blob)
+                    st.session_state["fv_user_geojson"] = geojson
+                    st.session_state["fv_user_polygon_wkb"] = polygon.wkb.hex() if polygon is not None else None
+                    st.session_state["fv_uploaded_digest"] = digest
+                    st.toast(f"Camada carregada: {nfeat} feição(ões).")
+                    st.rerun(scope="fragment")
+                except Exception as exc:
+                    st.error(f"Não foi possível ler a geometria: {exc}")
 
     # Flash View V9.2 — exportação recolhida sob Atividade por faixa temporal
     with st.expander("Exportação", expanded=False):
@@ -1052,6 +986,12 @@ if tab_clim.open:
             daily_years = historical_repo.daily_years()
             monthly_years = historical_repo.monthly_years()
             yearly_years = historical_repo.yearly_years()
+            st.caption(
+                "Anos na base · anual: "
+                + (", ".join(map(str, yearly_years)) or "nenhum")
+                + " · mensal (12 meses completos): "
+                + (", ".join(map(str, historical_repo.complete_monthly_years())) or "nenhum")
+            )
 
             area_col, mode_col, scale_col, var_col = st.columns([1.15, 1.05, 0.9, 1.25])
             with area_col:
@@ -1064,8 +1004,9 @@ if tab_clim.open:
             with mode_col:
                 mode = st.selectbox(
                     "Produto",
-                    ["Período específico", "Climatologia"],
+                    ["Período específico", "Climatologia", "Anomalia"],
                     key="clim_mode",
+                    help="Anomalia = período escolhido menos a média dos anos de referência.",
                 )
             with scale_col:
                 scale_options = ["Diária", "Mensal", "Anual"] if mode == "Período específico" else ["Mensal", "Anual"]
@@ -1080,11 +1021,17 @@ if tab_clim.open:
             scale = {"Diária": "daily", "Mensal": "monthly", "Anual": "yearly"}[scale_label]
 
             spatial_payload, spatial_valid = _spatial_details(spatial_level, "clim")
-            fixed_range = fixed_map_range(variable, scale)
-            st.caption(
-                f"Escala de cores fixa para comparação: {fixed_range[0]:.3g} → {fixed_range[1]:.3g} "
-                f"{VARIABLES[variable]['map_unit']}. Valores acima do teto ficam saturados na cor máxima."
-            )
+            if mode == "Anomalia":
+                st.caption(
+                    "Escala divergente centrada em zero: **vermelho** = acima da média dos anos de referência, "
+                    "**azul** = abaixo. O limite da escala é ajustado à área (percentil 98)."
+                )
+            else:
+                fixed_range = fixed_map_range(variable, scale)
+                st.caption(
+                    f"Escala de cores fixa para comparação: {fixed_range[0]:.3g} → {fixed_range[1]:.3g} "
+                    f"{VARIABLES[variable]['map_unit']}. Valores acima do teto ficam saturados na cor máxima."
+                )
 
             request_spec = None
             request_payload = None
@@ -1153,6 +1100,41 @@ if tab_clim.open:
                             **spatial_payload,
                         }
 
+                elif mode == "Anomalia":
+                    if scale == "monthly":
+                        a1, a2 = st.columns(2)
+                        with a1:
+                            year = st.selectbox(
+                                "Ano", monthly_years, index=len(monthly_years) - 1, key="anom_month_year"
+                            )
+                        available_months = historical_repo.months_for_year(year)
+                        with a2:
+                            month = st.selectbox(
+                                "Mês", available_months, format_func=lambda m: MONTH_NAMES_PT[m],
+                                index=len(available_months) - 1, key="anom_month"
+                            )
+                        ref_options = historical_repo.years_for_month(month)
+                    else:
+                        year = st.selectbox(
+                            "Ano", yearly_years, index=len(yearly_years) - 1, key="anom_year"
+                        )
+                        month = None
+                        ref_options = yearly_years
+                    ref_years = st.multiselect(
+                        "Anos de referência (média)", ref_options, default=ref_options,
+                        key=f"anom_ref_years_{scale}",
+                    )
+                    if not ref_years:
+                        st.info("Selecione pelo menos um ano de referência para calcular a anomalia.")
+                        selection_valid = False
+                    else:
+                        request_payload = {
+                            "mode": mode, "scale": scale, "variable": variable,
+                            "year": int(year), "month": int(month) if month else None, "day": None,
+                            "years": tuple(sorted(map(int, ref_years))),
+                            **spatial_payload,
+                        }
+
                 else:
                     if scale == "monthly":
                         all_months = sorted({m for y in monthly_years for m in historical_repo.months_for_year(y)})
@@ -1206,7 +1188,7 @@ if tab_clim.open:
                     "**Gerar mapa** somente quando quiser processar a consulta."
                 )
 
-                if mode == "Climatologia":
+                if mode in {"Climatologia", "Anomalia"}:
                     n_selected = len(request_payload.get("years", ()))
                     if n_selected > 1:
                         st.warning(
@@ -1255,6 +1237,32 @@ if tab_clim.open:
                                 period_text = str(year)
                             source_text = Path(relpath).name
 
+                        elif mode == "Anomalia":
+                            year = request_payload["year"]
+                            month = request_payload.get("month")
+                            ref_years = tuple(request_payload["years"])
+                            with st.spinner("Calculando anomalia (período e média de referência)..."):
+                                lat, lon, current, _ = _specific_field(
+                                    historical_config, scale, year, month, None, variable
+                                )
+                                _, _, reference, n_periods = _climatology_field(
+                                    historical_config, scale, month, ref_years, variable
+                                )
+                            current = np.asarray(current, dtype=np.float64)
+                            reference = np.asarray(reference, dtype=np.float64)
+                            if variable == "flash_count":
+                                # Célula sem flash é zero; só fica NaN fora do domínio dos dois campos.
+                                both_missing = ~np.isfinite(current) & ~np.isfinite(reference)
+                                field = np.nan_to_num(current) - np.nan_to_num(reference)
+                                field[both_missing] = np.nan
+                            else:
+                                field = current - reference
+                            if scale == "monthly":
+                                period_text = f"Anomalia de {MONTH_NAMES_PT[month]} de {year}"
+                            else:
+                                period_text = f"Anomalia de {year}"
+                            source_text = f"{year} vs. média de " + ", ".join(map(str, ref_years))
+
                         else:
                             selected_years = tuple(request_payload["years"])
                             month = request_payload.get("month")
@@ -1285,9 +1293,14 @@ if tab_clim.open:
                             else f"Limite — {location_label}"
                         )
                         context_geojson = _states_geojson() if spatial_level_now in {"Brasil", "Retângulo", "Buffer circular"} else None
-                        display_range = fixed_map_range(variable, scale)
+                        is_anomaly = mode == "Anomalia"
 
                         with st.spinner(f"Montando o mapa — {location_label}..."):
+                            dl_lat, dl_lon, dl_field = clip_field_to_geometry(
+                                lat, lon, field, clip_geometry
+                            )
+                            display_range = (anomaly_range(dl_field) if is_anomaly
+                                             else fixed_map_range(variable, scale))
                             hist_map = build_historical_map(
                                 lat,
                                 lon,
@@ -1299,9 +1312,7 @@ if tab_clim.open:
                                 boundary_name=boundary_name,
                                 mask_to_geometry=True,
                                 display_range=display_range,
-                            )
-                            dl_lat, dl_lon, dl_field = clip_field_to_geometry(
-                                lat, lon, field, clip_geometry
+                                anomaly=is_anomaly,
                             )
 
                         render_id = int(st.session_state.get("historical_map_render_id", 0)) + 1
@@ -1328,6 +1339,7 @@ if tab_clim.open:
                             "export_source_field": np.asarray(field, dtype=np.float32),
                             "geometry_wkb_hex": clip_geometry.wkb.hex() if clip_geometry is not None else None,
                             "display_range": tuple(map(float, display_range)),
+                            "anomaly": is_anomaly,
                         }
                     except Exception as exc:
                         st.error("Não foi possível gerar o produto histórico selecionado.")
@@ -1425,7 +1437,8 @@ if tab_clim.open:
                                             meta=metah,variable=result["variable"],
                                             fixed_range=result["display_range"],geometry=export_area.geometry,
                                             width=export_width,unit=VARIABLES[result["variable"]]["map_unit"],
-                                            overlay_geojson=st.session_state.get("fv_user_geojson"))
+                                            overlay_geojson=st.session_state.get("fv_user_geojson"),
+                                            cmap_name=ANOMALY_CMAP if result.get("anomaly") else "turbo")
                                     st.session_state["fv_hist_board"] = {
                                         "key":hist_key,"png":p,"name":safe_name(result["variable"],
                                             export_area.label,result["period_text"])}
@@ -1447,7 +1460,12 @@ if tab_clim.open:
                                                  result["period_text"],extension="nc"),
                             mime="application/x-netcdf",key=f"map_nc_{result['render_id']}")
 
-                        if result["variable"] == "flash_count":
+                        if result.get("anomaly"):
+                            st.caption(
+                                "Anomalia = valor do período − média dos anos de referência, célula a célula. "
+                                "Para número de flashes, células sem flashes contam como zero."
+                            )
+                        elif result["variable"] == "flash_count":
                             st.caption(
                                 "Nos mapas específicos, `flash_count` representa a contagem acumulada de flashes por célula "
                                 "na escala selecionada. Nas climatologias, é apresentada a média entre os períodos utilizados. "
@@ -1499,12 +1517,24 @@ if tab_series.open:
 
                 spatial_payload, spatial_valid = _spatial_details(spatial_level, "series")
                 location_label = spatial_payload.get("location_label", "Brasil")
-                location_key = (
-                    spatial_level,
-                    spatial_payload.get("uf"),
-                    spatial_payload.get("code_muni"),
-                    spatial_payload.get("geometry_wkb_hex"),
-                )
+
+                compare_payload = None
+                if st.toggle("Comparar com outra área", key="series_compare"):
+                    compare_level = st.selectbox(
+                        "Segunda área",
+                        ["Estado", "Município", "Brasil", "Retângulo", "Buffer circular"],
+                        key="series_cmp_area",
+                    )
+                    compare_payload, compare_valid = _spatial_details(compare_level, "series_cmp")
+                    spatial_valid = spatial_valid and compare_valid
+
+                def _location_key(payload):
+                    if payload is None:
+                        return None
+                    return (payload.get("spatial_level"), payload.get("uf"),
+                            payload.get("code_muni"), payload.get("geometry_wkb_hex"))
+
+                location_key = (_location_key(spatial_payload), _location_key(compare_payload))
 
                 # -----------------------------------------------------------------
                 # Período: nenhum NetCDF é lido aqui. O cálculo só ocorre no botão.
@@ -1622,16 +1652,23 @@ if tab_series.open:
                         )
 
                     if calculate_series:
-                        with st.spinner("Calculando somente o período solicitado..."):
-                            geometry = _geometry_from_payload(spatial_payload)
-                            series = _series_cached(
+                        def _series_for(payload):
+                            return _series_cached(
                                 historical_config,
-                                geometry.wkb,
+                                _geometry_from_payload(payload).wkb,
                                 series_scale,
                                 series_variable,
                                 start_ts.strftime("%Y-%m-%d"),
                                 end_ts.strftime("%Y-%m-%d"),
                             )
+
+                        with st.spinner("Calculando somente o período solicitado..."):
+                            series = _series_for(spatial_payload)
+                            compare_series = _series_for(compare_payload) if compare_payload else None
+                        st.session_state["historical_series_compare"] = (
+                            (compare_payload.get("location_label", "Brasil"), compare_series)
+                            if compare_payload else None
+                        )
                         st.session_state["historical_series_result"] = series
                         st.session_state["historical_series_signature"] = request_signature
                         st.session_state["historical_series_location"] = location_label
@@ -1659,6 +1696,13 @@ if tab_series.open:
                             else:
                                 max_period = str(max_date.year)
 
+                            compare = st.session_state.get("historical_series_compare")
+                            compare_label, compare_valid = None, pd.DataFrame()
+                            if compare is not None:
+                                compare_label, compare_raw = compare
+                                if compare_raw is not None and not compare_raw.empty:
+                                    compare_valid = compare_raw[np.isfinite(compare_raw["value"])].copy()
+
                             c1, c2, c3 = st.columns(3)
                             with c1:
                                 _card("Local", location_label, spatial_level)
@@ -1666,7 +1710,9 @@ if tab_series.open:
                                 _card(
                                     "Média da série",
                                     format_value(mean_value, series_variable),
-                                    VARIABLES[series_variable]["label"],
+                                    (f"{compare_label}: "
+                                     + format_value(float(compare_valid["value"].mean()), series_variable))
+                                    if not compare_valid.empty else VARIABLES[series_variable]["label"],
                                 )
                             with c3:
                                 _card(
@@ -1675,53 +1721,64 @@ if tab_series.open:
                                     max_period,
                                 )
 
-                            plot = valid.copy()
-                            if series_scale in {"daily", "monthly"}:
-                                plot["x"] = pd.to_datetime(plot["date"])
-                            else:
-                                plot["x"] = plot["year"].astype(int)
-
                             if series_scale == "daily":
-                                hover = "%{x|%d/%m/%Y}<br>Valor: %{y:,.3g}<extra></extra>"
+                                hover = "%{x|%d/%m/%Y}<br>%{fullData.name}: %{y:,.3g}<extra></extra>"
                             elif series_scale == "monthly":
-                                hover = "%{x|%m/%Y}<br>Valor: %{y:,.3g}<extra></extra>"
+                                hover = "%{x|%m/%Y}<br>%{fullData.name}: %{y:,.3g}<extra></extra>"
                             else:
-                                hover = "Ano: %{x}<br>Valor: %{y:,.3g}<extra></extra>"
+                                hover = "Ano: %{x}<br>%{fullData.name}: %{y:,.3g}<extra></extra>"
+
+                            def _x_values(frame):
+                                if series_scale in {"daily", "monthly"}:
+                                    return pd.to_datetime(frame["date"])
+                                return frame["year"].astype(int)
 
                             fig = go.Figure()
-                            fig.add_trace(
-                                go.Scatter(
-                                    x=plot["x"],
-                                    y=plot["value"],
-                                    mode="lines+markers",
-                                    name=VARIABLES[series_variable]["short"],
-                                    hovertemplate=hover,
-                                )
-                            )
+                            fig.add_trace(go.Scatter(
+                                x=_x_values(valid), y=valid["value"], mode="lines+markers",
+                                name=location_label, hovertemplate=hover,
+                            ))
+                            if not compare_valid.empty:
+                                fig.add_trace(go.Scatter(
+                                    x=_x_values(compare_valid), y=compare_valid["value"],
+                                    mode="lines+markers", name=compare_label, hovertemplate=hover,
+                                ))
+                            title_places = (f"{location_label} × {compare_label}"
+                                            if not compare_valid.empty else location_label)
                             fig.update_layout(
-                                title=f"{VARIABLES[series_variable]['label']} — {location_label}",
+                                title=f"{VARIABLES[series_variable]['label']} — {title_places}",
                                 xaxis_title="Período",
                                 yaxis_title=f"{VARIABLES[series_variable]['label']} ({VARIABLES[series_variable]['unit']})",
                                 hovermode="x unified",
                                 height=520,
                                 margin=dict(l=20, r=20, t=70, b=20),
+                                showlegend=not compare_valid.empty,
+                                legend=dict(orientation="h", y=1.02, x=1, xanchor="right", yanchor="bottom"),
                             )
-                            fig.update_layout(template="plotly_dark",paper_bgcolor="#101c2b",
-                                              plot_bgcolor="#14253a",font_color="#e4eef9")
+                            _style_figure(fig)
                             if series_variable == "flash_count":
                                 fig.update_yaxes(rangemode="tozero")
                             st.plotly_chart(fig, width="stretch", config={"displaylogo": False})
+                            if compare is not None and compare_valid.empty:
+                                st.warning(f"Sem células válidas na segunda área ({compare_label}).")
 
                             st.markdown("---")
                             st.markdown("**Downloads da série**")
                             png_bytes = render_image_board(
                                 _series_figure_png(valid, scale=series_scale,
-                                    variable=series_variable,location_label=location_label),
+                                    variable=series_variable,location_label=location_label,
+                                    compare=compare_valid if not compare_valid.empty else None,
+                                    compare_label=compare_label),
                                 meta=BoardMeta(product="Série temporal: "+VARIABLES[series_variable]["label"],
                                     region=location_label,period=f"Série {series_scale}",
                                     resolution="Produto histórico GLM",basemap="satellite"),
                                 chart_kind="Série temporal")
-                            csv_bytes = _series_csv_bytes(valid)
+                            csv_frame = valid.assign(area=location_label)
+                            if not compare_valid.empty:
+                                csv_frame = pd.concat(
+                                    [csv_frame, compare_valid.assign(area=compare_label)], ignore_index=True
+                                )
+                            csv_bytes = _series_csv_bytes(csv_frame)
                             d1, d2, d3, dspace = st.columns([1.35, 1.35, 1.35, 2.0])
                             with d1:
                                 st.download_button(
@@ -1920,8 +1977,8 @@ if tab_rank.open:
                             margin=dict(l=20, r=20, t=70, b=30),
                             yaxis={"autorange": "reversed"},
                         )
-                        fig_rank.update_layout(template="plotly_dark",
-                            paper_bgcolor="#101c2b",plot_bgcolor="#14253a",font_color="#e4eef9")
+                        fig_rank.update_traces(marker_color="#087fa3")
+                        _style_figure(fig_rank)
                         st.plotly_chart(fig_rank, width="stretch", config={"displaylogo": False})
 
                         table_cols = ["rank", "Local", "flash_count", "flash_density", "area_km2"]
@@ -1940,7 +1997,7 @@ if tab_rank.open:
                                 title=f"Flash View | Top {len(display)} — {rank_metric_label}"),
                             meta=BoardMeta(product="Ranking — " + rank_metric_label,
                                 region=rank_uf if rank_uf else "Brasil",
-                                period=f"{rank_scale_label} • {rank_start} a {rank_end}",
+                                period=f"{rank_scale_label} • {rank_start:%m/%Y} a {rank_end:%m/%Y}",
                                 resolution="Estatísticas administrativas GLM"),
                             chart_kind="Ranking administrativo",
                             metric_text=f"{len(display)} localidades")
@@ -1957,11 +2014,11 @@ if tab_rank.open:
                             key="download_ranking_csv",
                         )
 
-    # =============================================================================
-    # RODAPÉ
-    # =============================================================================
-    st.markdown("---")
-    st.caption(
-        "Flash View • Dados de relâmpagos do Geostationary Lightning Mapper (GLM) / NOAA. "
-        "Monitoramento quase em tempo real e análise histórica em uma única interface."
-    )
+# =============================================================================
+# RODAPÉ
+# =============================================================================
+st.markdown("---")
+st.caption(
+    "Flash View • Dados de relâmpagos do Geostationary Lightning Mapper (GLM) / NOAA. "
+    "Monitoramento quase em tempo real e análise histórica em uma única interface."
+)

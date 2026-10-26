@@ -133,7 +133,9 @@ function clusterElement(props, selectionActive, onExpand){
 }
 
 function setGeoJSON(map,id,geojson){
-  if(!map||!map.isStyleLoaded())return;
+  // Não usar isStyleLoaded(): ele fica falso enquanto tiles/fontes ainda carregam
+  // (inclusive logo após o 'load'), e os flashes só apareciam ao clicar em "Ao vivo".
+  if(!map)return;
   const source=map.getSource(id);
   if(source)source.setData(geojson||emptyCollection());
 }
