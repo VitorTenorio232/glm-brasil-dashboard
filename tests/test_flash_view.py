@@ -67,3 +67,27 @@ def test_activity_trend_windows():
     assert (summary.latest_10min, summary.previous_10min) == (12, 4)
     assert summary.trend.startswith("Intensificação")
     assert summary.delta_percent == 200
+
+
+def test_tendencia_quatro_tipos_de_area():
+    import pandas as pd
+    from shapely.geometry import box
+    from src.previsao_flash import AREA_MODES, _norm_code, _union, area_label, rect_from_drawing
+    from src.spatial_tools import filter_points_by_geometry
+
+    assert AREA_MODES == ["Pontual", "Retângulo", "Estados", "Municípios"]
+    # GeoJSON do Leaflet.Draw (lon, lat) -> (sul, norte, oeste, leste)
+    drawing = {"type": "Feature", "geometry": {"type": "Polygon", "coordinates": [[
+        [-48.0, -23.0], [-48.0, -18.0], [-42.0, -18.0], [-42.0, -23.0], [-48.0, -23.0]]]}}
+    assert rect_from_drawing(drawing) == (-23.0, -18.0, -48.0, -42.0)
+    assert rect_from_drawing(None) is None
+
+    assert area_label(["MG", "SP"], "estados") == "MG, SP"
+    assert area_label(["A", "B", "C", "D"], "municípios") == "4 municípios: A, B e outros"
+    assert _norm_code(3132404.0) == "3132404" and _norm_code("3132404") == "3132404"
+
+    # Duas áreas separadas: os flashes de ambas entram, o de fora não.
+    union = _union([box(0, 0, 1, 1), box(5, 5, 6, 6)])
+    flashes = pd.DataFrame({"lat": [0.5, 5.5, 3.0], "lon": [0.5, 5.5, 3.0]})
+    assert len(filter_points_by_geometry(flashes, union)) == 2
+    assert _union([]) is None

@@ -1,5 +1,12 @@
 # Histórico de mudanças
 
+## 2026-11-02 (Tendência)
+
+### Novidades
+- **Tendência com 4 tipos de área:** Pontual (clique no mapa ou coordenadas, com raio), Retângulo (desenhado
+  no mapa com a ferramenta ▭ ou digitado), Estados e Municípios — nestes dois, vários de uma vez (a análise
+  usa a união das áreas). A tabela "Panorama por estado" continua abrindo o estado clicado.
+
 ## 2026-11-02
 
 ### Novidades

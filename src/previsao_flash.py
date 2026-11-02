@@ -136,10 +136,56 @@ def state_activity_table(observation_key: str, _flashes: pd.DataFrame,
             .reset_index(drop=True))
 
 
+AREA_MODES = ["Pontual", "Retângulo", "Estados", "Municípios"]
+# Nomes usados antes das 4 opções (sessões abertas continuam funcionando).
+_OLD_AREA_MODES = {"Ponto e raio": "Pontual", "Estado inteiro": "Estados"}
+
+
+def _norm_code(code) -> str:
+    """Código IBGE como texto sem '.0' (o geobr pode trazer float)."""
+    try:
+        return str(int(float(code)))
+    except (TypeError, ValueError):
+        return str(code)
+
+
+def rect_from_drawing(drawing: dict | None) -> tuple[float, float, float, float] | None:
+    """(sul, norte, oeste, leste) de um retângulo desenhado no mapa (GeoJSON do Leaflet.Draw)."""
+    from src.spatial_tools import geometry_from_geojson
+    geom = geometry_from_geojson(drawing)
+    if geom is None:
+        return None
+    west, south, east, north = geom.bounds
+    return round(south, 4), round(north, 4), round(west, 4), round(east, 4)
+
+
+def area_label(names: list[str], kind: str) -> str:
+    """Rótulo curto para vários estados/municípios: até 3 nomes; acima disso, a contagem."""
+    if len(names) <= 3:
+        return ", ".join(names)
+    return f"{len(names)} {kind}: {', '.join(names[:2])} e outros"
+
+
+def _municipality_geometries(selected: list[tuple[str, str]]):
+    """Polígonos dos municípios escolhidos, lidos por UF (geobr/IBGE 2022, com cache)."""
+    from src.historical_glm import load_municipalities
+    geoms = []
+    for uf in sorted({uf for _, uf in selected}):
+        mun = load_municipalities(uf)
+        wanted = {_norm_code(code) for code, u in selected if u == uf}
+        geoms.extend(mun.loc[mun["code_muni"].map(_norm_code).isin(wanted)].geometry.tolist())
+    return geoms
+
+
+def _union(geoms):
+    from shapely import union_all
+    return union_all(geoms) if geoms else None
+
+
 def build_observed_map(lat: float, lon: float, radius_km: int,
                        flashes: pd.DataFrame, *, center=None, zoom=4, geometry=None,
-                       geometry_label: str = "Área selecionada"):
-    """Mapa interativo com TODOS os flashes presentes no círculo ou estado selecionado."""
+                       geometry_label: str = "Área selecionada", draw_rectangle: bool = False):
+    """Mapa interativo com TODOS os flashes presentes no círculo ou na área selecionada."""
     center = center or [lat, lon]
     m = folium.Map(location=center, zoom_start=int(zoom), tiles=None,
                    control_scale=True, prefer_canvas=True)
@@ -200,6 +246,15 @@ def build_observed_map(lat: float, lon: float, radius_km: int,
                 ).add_to(layer)
             layer.add_to(m)
     add_collapsible_glm_legend(m, list(AGE_GROUPS) + [("30–60 min", 30, 60.01, "#a8b3c7")])
+    if draw_rectangle:
+        from folium.plugins import Draw
+        Draw(
+            export=False, position="topleft",
+            draw_options={"polyline": False, "polygon": False, "circle": False, "marker": False,
+                          "circlemarker": False,
+                          "rectangle": {"shapeOptions": {"color": "#f43f5e", "weight": 2.5, "fillOpacity": 0.06}}},
+            edit_options={"edit": False, "remove": False},
+        ).add_to(m)
     Fullscreen(position="topleft").add_to(m)
     folium.LayerControl(collapsed=True).add_to(m)
     return m
@@ -233,9 +288,9 @@ def _queue_point(lat: float, lon: float, *, recenter: bool = True):
 def render_trend_tab(*, snapshot_loader=None):
     st.markdown('<div class="section-heading">📊 Tendência observada de atividade elétrica</div>',
                 unsafe_allow_html=True)
-    st.caption("Observações GLM-L2-LCFA. Clique no mapa, digite latitude/longitude ou "
-               "selecione UF e município. Os flashes são mostrados na última hora "
-               "disponível (30–60 min em cinza); a tendência compara os "
+    st.caption("Observações GLM-L2-LCFA. Analise um ponto com raio (clique no mapa ou digite as "
+               "coordenadas), um retângulo, um ou mais estados ou um ou mais municípios. Os flashes "
+               "são mostrados na última hora disponível (30–60 min em cinza); a tendência compara os "
                "três intervalos mais recentes de 10 minutos.")
 
     # Migração da V4: evita reutilizar o antigo ponto inicial (-15, -60)
@@ -261,11 +316,19 @@ def render_trend_tab(*, snapshot_loader=None):
     pending = st.session_state.pop("fv_trend_pending_point", None)
     if pending is not None:
         _update_point(pending[0], pending[1], recenter=pending[2])
+    if st.session_state.get("fv_trend_area_mode") in _OLD_AREA_MODES:
+        st.session_state["fv_trend_area_mode"] = _OLD_AREA_MODES[st.session_state["fv_trend_area_mode"]]
     # Linha clicada no "Panorama por estado": aplica antes de criar os widgets.
     pending_state = st.session_state.pop("fv_trend_pending_state", None)
     if pending_state is not None:
-        st.session_state["fv_trend_area_mode"] = "Estado inteiro"
-        st.session_state["fv_trend_state_area"] = pending_state
+        st.session_state["fv_trend_area_mode"] = "Estados"
+        st.session_state["fv_trend_states"] = [pending_state]
+    # Retângulo desenhado no mapa: preenche os campos antes de criá-los.
+    pending_rect = st.session_state.pop("fv_trend_pending_rect", None)
+    if pending_rect is not None:
+        for key, value in zip(("fv_trend_rect_s", "fv_trend_rect_n", "fv_trend_rect_w", "fv_trend_rect_e"),
+                              pending_rect):
+            st.session_state[key] = value
 
     snapshot = None
     load_error = None
@@ -276,29 +339,72 @@ def render_trend_tab(*, snapshot_loader=None):
             load_error = exc
 
     col_map, col_side = st.columns([1.7, 1], gap="large")
-    state_geom = None
+    state_geom = None  # geometria da área nos modos Retângulo/Estados/Municípios
     state_label = None
     radius = int(st.session_state.get("fv_trend_obs_radius", 40))
     with col_side:
         st.markdown("**Área de interesse**")
         # Valor inicial via session_state (sem default=), pois a tabela também altera este controle.
-        st.session_state.setdefault("fv_trend_area_mode", "Ponto e raio")
+        st.session_state.setdefault("fv_trend_area_mode", "Pontual")
         area_mode = st.segmented_control(
-            "Tipo de análise", ["Ponto e raio", "Estado inteiro"], key="fv_trend_area_mode",
-        ) or "Ponto e raio"
+            "Tipo de análise", AREA_MODES, key="fv_trend_area_mode",
+        ) or "Pontual"
 
-        if area_mode == "Estado inteiro":
+        if area_mode == "Retângulo":
+            st.caption("Desenhe com a ferramenta ▭ no canto do mapa ou digite os limites (graus decimais).")
+            r1, r2 = st.columns(2)
+            south = r1.number_input("Lat. sul", -90.0, 90.0, value=None, step=0.1, format="%.4f",
+                                    placeholder="ex.: -23,0", key="fv_trend_rect_s")
+            north = r2.number_input("Lat. norte", -90.0, 90.0, value=None, step=0.1, format="%.4f",
+                                    placeholder="ex.: -18,0", key="fv_trend_rect_n")
+            west = r1.number_input("Lon. oeste", -180.0, 180.0, value=None, step=0.1, format="%.4f",
+                                   placeholder="ex.: -48,0", key="fv_trend_rect_w")
+            east = r2.number_input("Lon. leste", -180.0, 180.0, value=None, step=0.1, format="%.4f",
+                                   placeholder="ex.: -42,0", key="fv_trend_rect_e")
+            if None not in (south, north, west, east):
+                from src.spatial_tools import rectangle_geometry
+                try:
+                    state_geom = rectangle_geometry(south, west, north, east)
+                    w, s, e, n = state_geom.bounds
+                    state_label = f"Retângulo {s:.2f}°, {w:.2f}° → {n:.2f}°, {e:.2f}°"
+                except ValueError as exc:
+                    st.warning(str(exc))
+
+        elif area_mode == "Estados":
             try:
                 states = _simplified_states()
                 lookup = {f"{r.abbrev_state} — {r.name_state}": r.abbrev_state
                           for r in states.itertuples()}
-                chosen = st.selectbox("Estado", list(lookup), key="fv_trend_state_area")
-                state_geom = states.loc[states["abbrev_state"].eq(lookup[chosen])].iloc[0].geometry
-                state_label = chosen
+                chosen = st.multiselect("Estados", list(lookup), key="fv_trend_states",
+                                        placeholder="Escolha um ou mais estados")
+                if chosen:
+                    ufs = [lookup[c] for c in chosen]
+                    state_geom = _union(states.loc[states["abbrev_state"].isin(ufs)].geometry.tolist())
+                    state_label = chosen[0] if len(chosen) == 1 else area_label(ufs, "estados")
             except Exception as exc:
                 st.warning("Limites dos estados indisponíveis nesta sessão.")
                 with st.expander("Detalhes técnicos"):
                     st.exception(exc)
+
+        elif area_mode == "Municípios":
+            try:
+                cities = city_catalog().sort_values(["name_muni", "abbrev_state"])
+                options = {f"{r.name_muni} ({r.abbrev_state})": (_norm_code(r.code_muni), r.abbrev_state)
+                           for r in cities.itertuples()}
+                chosen = st.multiselect("Municípios", list(options), key="fv_trend_munis",
+                                        max_selections=30, placeholder="Digite o nome e escolha um ou mais")
+                if chosen:
+                    with st.spinner("Carregando limites municipais (IBGE)…"):
+                        state_geom = _union(_municipality_geometries([options[c] for c in chosen]))
+                    if state_geom is None:
+                        st.warning("Limites desses municípios não encontrados.")
+                    else:
+                        state_label = area_label(chosen, "municípios")
+            except Exception as exc:
+                st.warning("Lista ou limites de municípios indisponíveis nesta sessão.")
+                with st.expander("Detalhes técnicos"):
+                    st.exception(exc)
+
         else:
             radius = st.slider("Raio da análise (km)", 10, 100, 40, 5,
                                key="fv_trend_obs_radius")
@@ -343,7 +449,9 @@ def render_trend_tab(*, snapshot_loader=None):
         tz_mode = st.segmented_control("Fuso do horário observado", ["Brasília", "UTC"],
                                        default="Brasília", key="fv_trend_time_zone") or "Brasília"
 
-    state_mode = area_mode == "Estado inteiro"
+    # Retângulo, Estados e Municípios usam a geometria da área; Pontual usa ponto + raio.
+    state_mode = area_mode != "Pontual"
+    rect_mode = area_mode == "Retângulo"
     point = st.session_state.get("fv_trend_selected_point")
     if point is None or state_mode:
         lat, lon = None, None
@@ -352,32 +460,58 @@ def render_trend_tab(*, snapshot_loader=None):
     if state_mode:
         from src.spatial_tools import filter_points_by_geometry
         has_area = state_geom is not None
-        inside = (filter_points_by_geometry(snapshot.flashes, state_geom)
-                  if snapshot is not None and has_area else pd.DataFrame())
+        inside = pd.DataFrame()
+        if snapshot is not None and has_area:
+            # Pré-filtro pela caixa da área antes do teste ponto-em-polígono.
+            minx, miny, maxx, maxy = state_geom.bounds
+            flashes = snapshot.flashes
+            near = flashes.loc[flashes["lon"].between(minx, maxx) & flashes["lat"].between(miny, maxy)]
+            inside = filter_points_by_geometry(near, state_geom)
     else:
         has_area = point is not None
         inside = (flashes_near_point(snapshot.flashes, lat, lon, radius)
                   if snapshot is not None and has_area else pd.DataFrame())
 
     with col_map:
+        map_keys = {"Pontual": "fv_trend_click_map_v5", "Retângulo": "fv_trend_rect_map",
+                    "Estados": "fv_trend_state_map", "Municípios": "fv_trend_muni_map"}
+        returned = {"Pontual": ["last_clicked", "center", "zoom"], "Retângulo": ["all_drawings"]}
         map_state = st_folium(
             build_observed_map(lat, lon, radius, inside,
                                center=st.session_state["fv_trend_map_center"],
                                zoom=st.session_state["fv_trend_map_zoom"],
-                               geometry=state_geom, geometry_label=state_label or ""),
+                               geometry=state_geom, geometry_label=state_label or "",
+                               draw_rectangle=rect_mode),
             width=None, height=510,
-            key="fv_trend_state_map" if state_mode else "fv_trend_click_map_v5",
-            returned_objects=[] if state_mode else ["last_clicked", "center", "zoom"],
+            key=map_keys[area_mode],
+            returned_objects=returned.get(area_mode, []),
         )
         if not has_area:
-            st.info("Clique no mapa para marcar um ponto de análise, ou selecione "
-                    "um município/insira coordenadas ao lado.")
+            st.info({
+                "Pontual": "Clique no mapa para marcar um ponto de análise, ou selecione "
+                           "um município/insira coordenadas ao lado.",
+                "Retângulo": "Desenhe um retângulo com a ferramenta ▭ no canto superior esquerdo do mapa, "
+                             "ou digite os quatro limites ao lado.",
+                "Estados": "Escolha um ou mais estados ao lado.",
+                "Municípios": "Escolha um ou mais municípios ao lado (digite o nome para buscar).",
+            }[area_mode])
         elif state_mode:
             st.caption(f"⚡ {len(inside)} flashes nos últimos 60 minutos em {state_label}. "
                        "O mapa exibe até 4 mil flashes; as contagens usam todos.")
         else:
             st.caption(f"⚡ {len(inside)} flashes nos últimos 60 minutos dentro do círculo de {radius} km. "
                        "Se não houver flashes na janela disponível, o círculo ficará sem pontos.")
+
+    if map_state and rect_mode:
+        drawings = map_state.get("all_drawings") or []
+        rect = rect_from_drawing(drawings[-1]) if drawings else None
+        current = tuple(st.session_state.get(k) for k in
+                        ("fv_trend_rect_s", "fv_trend_rect_n", "fv_trend_rect_w", "fv_trend_rect_e"))
+        # Só reage a um desenho novo; o mapa devolve o último desenho em todo rerun.
+        if rect and rect != current and rect != st.session_state.get("fv_trend_last_rect"):
+            st.session_state["fv_trend_last_rect"] = rect
+            st.session_state["fv_trend_pending_rect"] = rect
+            st.rerun()
 
     if map_state and not state_mode:
         view_center = map_state.get("center")
@@ -456,7 +590,7 @@ def render_trend_tab(*, snapshot_loader=None):
     elif snapshot is None:
         st.info("A leitura dos flashes GLM não está configurada.")
     elif not has_area:
-        st.info("Selecione um ponto ou um estado para calcular a tendência observada e exibir os flashes na área.")
+        st.info("Selecione um ponto, retângulo, estado(s) ou município(s) para calcular a tendência observada.")
     else:
         summary = analyze_glm_activity(inside, snapshot.observation_end_utc,
                                        snapshot.latency_minutes)
@@ -474,7 +608,8 @@ def render_trend_tab(*, snapshot_loader=None):
         if not inside.empty:
             export_cols = [c for c in ("time_start", "lat", "lon", "age_minutes",
                                        "age_group", "energy_j", "area_km2") if c in inside]
-            csv_name = (f"flash_view_tendencia_{state_label.split(' ')[0]}.csv" if state_mode
+            from src.cartographic_export import safe_name
+            csv_name = (safe_name("tendencia", state_label, extension="csv") if state_mode
                         else "flash_view_tendencia_observada.csv")
             st.download_button("⬇️ Baixar flashes da área (CSV)",
                 inside[export_cols].to_csv(index=False).encode("utf-8-sig"),
