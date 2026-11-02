@@ -2,6 +2,9 @@
 
 ## 2026-11-02 (Tendência)
 
+- **Tendência — opção Arquivo:** área de um shapefile (ZIP), KML, KMZ ou GeoJSON (até 20 MB; usa os polígonos),
+  ou reaproveita a área já importada na aba ao vivo.
+
 ### Novidades
 - **Tendência com 4 tipos de área:** Pontual (clique no mapa ou coordenadas, com raio), Retângulo (desenhado
   no mapa com a ferramenta ▭ ou digitado), Estados e Municípios — nestes dois, vários de uma vez (a análise

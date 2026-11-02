@@ -13,7 +13,7 @@ do satélite **GOES-19** (NOAA). Feito com Python e Streamlit.
 | 🌦️ **Climatologia** | Mapas diários, mensais e anuais, climatologias e **anomalias** (período − média dos anos de referência) para Brasil, estado, município, retângulo ou buffer. |
 | 📈 **Séries temporais** | Séries diárias, mensais ou anuais de uma área, com opção de **comparar duas áreas**. Download em PNG, JPEG e CSV. |
 | 🏆 **Ranking** | Municípios e estados com maior densidade ou número de flashes no período. |
-| 📊 **Tendência** | Atividade nos últimos 10/20/30 min em 4 tipos de área: **pontual** (clique no mapa ou coordenadas, com raio), **retângulo** (desenhado no mapa ou digitado), **estados** e **municípios** (vários de uma vez); e um panorama das 27 UFs (clique numa linha para abrir o estado). |
+| 📊 **Tendência** | Atividade nos últimos 10/20/30 min em 5 tipos de área: **pontual** (clique no mapa ou coordenadas, com raio), **retângulo** (desenhado no mapa ou digitado), **estados** e **municípios** (vários de uma vez) e **arquivo** (shapefile ZIP, KML, KMZ ou GeoJSON); e um panorama das 27 UFs (clique numa linha para abrir o estado). |
 
 > Um **flash** é um relâmpago completo detectado do espaço — inclui descargas dentro das nuvens e as que
 > tocam o solo. A tendência é observacional; não é previsão nem alerta oficial.

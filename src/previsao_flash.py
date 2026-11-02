@@ -136,7 +136,7 @@ def state_activity_table(observation_key: str, _flashes: pd.DataFrame,
             .reset_index(drop=True))
 
 
-AREA_MODES = ["Pontual", "Retângulo", "Estados", "Municípios"]
+AREA_MODES = ["Pontual", "Retângulo", "Estados", "Municípios", "Arquivo"]
 # Nomes usados antes das 4 opções (sessões abertas continuam funcionando).
 _OLD_AREA_MODES = {"Ponto e raio": "Pontual", "Estado inteiro": "Estados"}
 
@@ -175,6 +175,16 @@ def _municipality_geometries(selected: list[tuple[str, str]]):
         wanted = {_norm_code(code) for code, u in selected if u == uf}
         geoms.extend(mun.loc[mun["code_muni"].map(_norm_code).isin(wanted)].geometry.tolist())
     return geoms
+
+
+def area_from_upload(filename: str, content: bytes):
+    """(geometria, rótulo) de um shapefile ZIP/KML/KMZ/GeoJSON; usa só os polígonos do arquivo."""
+    from src.map_uploads import load_user_overlay
+    _geojson, polygon, nfeat = load_user_overlay(filename, content)
+    if polygon is None or polygon.is_empty:
+        raise ValueError("O arquivo não tem polígonos (só linhas ou pontos); a análise precisa de uma área.")
+    suffix = f" ({nfeat} feições)" if nfeat > 1 else ""
+    return polygon, f"Arquivo {Path(filename).name}{suffix}"
 
 
 def _union(geoms):
@@ -289,7 +299,8 @@ def render_trend_tab(*, snapshot_loader=None):
     st.markdown('<div class="section-heading">📊 Tendência observada de atividade elétrica</div>',
                 unsafe_allow_html=True)
     st.caption("Observações GLM-L2-LCFA. Analise um ponto com raio (clique no mapa ou digite as "
-               "coordenadas), um retângulo, um ou mais estados ou um ou mais municípios. Os flashes "
+               "coordenadas), um retângulo, um ou mais estados, um ou mais municípios ou a área de um "
+               "arquivo (shapefile, KML, KMZ, GeoJSON). Os flashes "
                "são mostrados na última hora disponível (30–60 min em cinza); a tendência compara os "
                "três intervalos mais recentes de 10 minutos.")
 
@@ -405,6 +416,38 @@ def render_trend_tab(*, snapshot_loader=None):
                 with st.expander("Detalhes técnicos"):
                     st.exception(exc)
 
+        elif area_mode == "Arquivo":
+            st.caption("Shapefile (ZIP com .shp, .shx, .dbf e .prj), KML, KMZ ou GeoJSON, até 20 MB. "
+                       "Usa os polígonos do arquivo; ele fica só na sua sessão.")
+            uploaded = st.file_uploader("Arquivo da área", type=["zip", "kmz", "kml", "geojson", "json"],
+                                        key=f"fv_trend_upload_{st.session_state.get('fv_trend_upload_version', 0)}")
+            if uploaded is not None:
+                import hashlib
+                blob = uploaded.getvalue()
+                digest = hashlib.sha256(blob).hexdigest()
+                if digest != (st.session_state.get("fv_trend_file") or {}).get("digest"):
+                    try:
+                        geom, label = area_from_upload(uploaded.name, blob)
+                        st.session_state["fv_trend_file"] = {"digest": digest, "wkb": geom.wkb.hex(), "label": label}
+                    except Exception as exc:
+                        st.error(f"Não foi possível usar o arquivo: {exc}")
+            elif st.session_state.get("fv_user_polygon_wkb") and not st.session_state.get("fv_trend_file"):
+                # Área já importada na aba "Relâmpagos em tempo real".
+                if st.button("Usar a área importada na aba ao vivo", key="fv_trend_use_live_upload",
+                             width="stretch"):
+                    st.session_state["fv_trend_file"] = {"digest": "ao-vivo", "label": "Área importada (aba ao vivo)",
+                                                         "wkb": st.session_state["fv_user_polygon_wkb"]}
+                    st.rerun()
+            stored = st.session_state.get("fv_trend_file")
+            if stored:
+                from shapely import from_wkb
+                state_geom = from_wkb(bytes.fromhex(stored["wkb"]))
+                state_label = stored["label"]
+                if st.button("✖ Remover área do arquivo", key="fv_trend_file_reset", width="stretch"):
+                    st.session_state.pop("fv_trend_file", None)
+                    st.session_state["fv_trend_upload_version"] = int(st.session_state.get("fv_trend_upload_version", 0)) + 1
+                    st.rerun()
+
         else:
             radius = st.slider("Raio da análise (km)", 10, 100, 40, 5,
                                key="fv_trend_obs_radius")
@@ -474,7 +517,8 @@ def render_trend_tab(*, snapshot_loader=None):
 
     with col_map:
         map_keys = {"Pontual": "fv_trend_click_map_v5", "Retângulo": "fv_trend_rect_map",
-                    "Estados": "fv_trend_state_map", "Municípios": "fv_trend_muni_map"}
+                    "Estados": "fv_trend_state_map", "Municípios": "fv_trend_muni_map",
+                    "Arquivo": "fv_trend_file_map"}
         returned = {"Pontual": ["last_clicked", "center", "zoom"], "Retângulo": ["all_drawings"]}
         map_state = st_folium(
             build_observed_map(lat, lon, radius, inside,
@@ -494,6 +538,7 @@ def render_trend_tab(*, snapshot_loader=None):
                              "ou digite os quatro limites ao lado.",
                 "Estados": "Escolha um ou mais estados ao lado.",
                 "Municípios": "Escolha um ou mais municípios ao lado (digite o nome para buscar).",
+                "Arquivo": "Envie ao lado um shapefile (ZIP), KML, KMZ ou GeoJSON com a área.",
             }[area_mode])
         elif state_mode:
             st.caption(f"⚡ {len(inside)} flashes nos últimos 60 minutos em {state_label}. "
@@ -590,7 +635,7 @@ def render_trend_tab(*, snapshot_loader=None):
     elif snapshot is None:
         st.info("A leitura dos flashes GLM não está configurada.")
     elif not has_area:
-        st.info("Selecione um ponto, retângulo, estado(s) ou município(s) para calcular a tendência observada.")
+        st.info("Selecione um ponto, retângulo, estado(s), município(s) ou arquivo para calcular a tendência observada.")
     else:
         summary = analyze_glm_activity(inside, snapshot.observation_end_utc,
                                        snapshot.latency_minutes)

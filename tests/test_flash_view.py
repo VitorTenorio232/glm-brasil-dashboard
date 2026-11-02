@@ -75,7 +75,7 @@ def test_tendencia_quatro_tipos_de_area():
     from src.previsao_flash import AREA_MODES, _norm_code, _union, area_label, rect_from_drawing
     from src.spatial_tools import filter_points_by_geometry
 
-    assert AREA_MODES == ["Pontual", "Retângulo", "Estados", "Municípios"]
+    assert AREA_MODES == ["Pontual", "Retângulo", "Estados", "Municípios", "Arquivo"]
     # GeoJSON do Leaflet.Draw (lon, lat) -> (sul, norte, oeste, leste)
     drawing = {"type": "Feature", "geometry": {"type": "Polygon", "coordinates": [[
         [-48.0, -23.0], [-48.0, -18.0], [-42.0, -18.0], [-42.0, -23.0], [-48.0, -23.0]]]}}
@@ -91,3 +91,43 @@ def test_tendencia_quatro_tipos_de_area():
     flashes = pd.DataFrame({"lat": [0.5, 5.5, 3.0], "lon": [0.5, 5.5, 3.0]})
     assert len(filter_points_by_geometry(flashes, union)) == 2
     assert _union([]) is None
+
+
+def test_tendencia_area_de_arquivo(tmp_path):
+    import io
+    import json
+    import zipfile
+
+    import geopandas as gpd
+    import pytest
+    from shapely.geometry import box
+    from src.previsao_flash import area_from_upload
+
+    area = box(-60.0, -5.0, -58.0, -3.0)
+
+    # Shapefile em ZIP (.shp, .shx, .dbf, .prj), como sai do QGIS.
+    gpd.GeoDataFrame({"nome": ["teste"]}, geometry=[area], crs=4326).to_file(tmp_path / "area.shp")
+    buf = io.BytesIO()
+    with zipfile.ZipFile(buf, "w") as zf:
+        for ext in ("shp", "shx", "dbf", "prj"):
+            zf.write(tmp_path / f"area.{ext}", f"area.{ext}")
+    geom, label = area_from_upload("minha_area.zip", buf.getvalue())
+    assert geom.equals_exact(area, 1e-6) or abs(geom.area - area.area) < 1e-9
+    assert label == "Arquivo minha_area.zip"
+
+    kml = ("<?xml version='1.0'?><kml xmlns='http://www.opengis.net/kml/2.2'><Placemark><Polygon>"
+           "<outerBoundaryIs><LinearRing><coordinates>-60,-5 -58,-5 -58,-3 -60,-3 -60,-5</coordinates>"
+           "</LinearRing></outerBoundaryIs></Polygon></Placemark></kml>").encode()
+    geom, _ = area_from_upload("area.kml", kml)
+    assert abs(geom.area - area.area) < 1e-9
+
+    two = {"type": "FeatureCollection", "features": [
+        {"type": "Feature", "properties": {}, "geometry": json.loads(json.dumps(box(-60, -5, -59, -4).__geo_interface__))},
+        {"type": "Feature", "properties": {}, "geometry": json.loads(json.dumps(box(-50, -5, -49, -4).__geo_interface__))},
+    ]}
+    geom, label = area_from_upload("duas.geojson", json.dumps(two).encode())
+    assert abs(geom.area - 2.0) < 1e-9 and label.endswith("(2 feições)")
+
+    line = {"type": "LineString", "coordinates": [[-60, -5], [-58, -3]]}
+    with pytest.raises(ValueError, match="polígonos"):
+        area_from_upload("linha.geojson", json.dumps(line).encode())
