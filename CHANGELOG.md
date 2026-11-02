@@ -1,5 +1,19 @@
 # Histórico de mudanças
 
+## 2026-11-02
+
+### Novidades
+- **Base histórica até 31/12/2025** (2024 e 2025: diário, mensal e anual). Os avisos do site usam a data-limite
+  configurada em vez de "2023" fixo.
+- `scripts/accumulate_glm.py`: acumula diário → mensal e mensal → anual com a mesma regra da base original
+  (contagem somada; energia, área e duração com média ponderada pela contagem). Validado refazendo
+  jan/2024, mai/2025 e o anual de 2024: contagens idênticas e médias com diferença ≤ 4·10⁻⁷.
+  Usado para gerar abr/2025 (troca GOES-16 → GOES-19 em 07/04) e o anual de 2025.
+
+### Correções
+- A legenda "Anos na base" agora mostra também os anos com dados **diários** (antes, na escala diária só
+  aparecia 2023 sem explicação, porque a pasta 02_DAILY tem menos anos que a mensal/anual).
+
 ## 2026-10-26
 
 ### Correções

@@ -978,7 +978,7 @@ if tab_clim.open:
                 "**Climatologia:** para número de flashes, calcula-se a **média climatológica das contagens** "
                 "dos períodos selecionados; para energia, área e duração, mantém-se a média ponderada pelos flashes."
             )
-        st.info("📅 Base histórica processada disponível até **31/12/2023**.")
+        st.info(f"📅 Base histórica processada disponível até **{HISTORICAL_MAX_DATE:%d/%m/%Y}**.")
 
         if historical_repo is None:
             _historical_unavailable()
@@ -991,6 +991,9 @@ if tab_clim.open:
                 + (", ".join(map(str, yearly_years)) or "nenhum")
                 + " · mensal (12 meses completos): "
                 + (", ".join(map(str, historical_repo.complete_monthly_years())) or "nenhum")
+                # A escala diária depende de outra pasta (02_DAILY), que pode ter menos anos.
+                + " · diária: "
+                + (", ".join(map(str, daily_years)) or "nenhum")
             )
 
             area_col, mode_col, scale_col, var_col = st.columns([1.15, 1.05, 0.9, 1.25])
@@ -1488,7 +1491,7 @@ if tab_series.open:
         st.markdown('<div class="section-heading">Séries temporais</div>', unsafe_allow_html=True)
         st.caption(
             "Séries diárias, mensais ou anuais calculadas somente após você definir o período e clicar em "
-            "**Calcular série**. A base histórica processada termina em 31/12/2023."
+            f"**Calcular série**. A base histórica processada termina em {HISTORICAL_MAX_DATE:%d/%m/%Y}."
         )
 
         if historical_repo is None:

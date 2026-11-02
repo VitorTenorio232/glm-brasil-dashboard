@@ -21,7 +21,7 @@ do satélite **GOES-19** (NOAA). Feito com Python e Streamlit.
 ## De onde vêm os dados
 
 - **Tempo real:** arquivos GLM-L2-LCFA (~20 s cada) do bucket público da NOAA na AWS. Não precisa de chave.
-- **Histórico (até 31/12/2023):** grades NetCDF processadas, guardadas num Dataset privado do Hugging Face
+- **Histórico (até 31/12/2025):** grades NetCDF processadas, guardadas num Dataset privado do Hugging Face
   (`01_HOURLY`, `02_DAILY`, `03_MONTHLY`, `04_YEARLY`, `05_RANKINGS`). Precisa de `HF_TOKEN`.
 - **Limites de estados e municípios:** IBGE, via pacote `geobr`.
 
