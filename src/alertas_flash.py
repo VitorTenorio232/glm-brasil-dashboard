@@ -73,14 +73,16 @@ def render_observational_alert(st, summary: LightningActivity) -> None:
     """UI leve, sem notificação externa ou falsas classes de severidade."""
     with st.container(border=True):
         st.markdown('**⚡ Monitoramento de atividade elétrica — GLM**')
-        c1, c2, c3 = st.columns(3)
+        # As três janelas usadas na tendência + a tendência em si.
+        c1, c2, c3, c4 = st.columns(4)
         delta = (f'{summary.delta_percent:+.0f}% vs. 10 min anteriores'
                  if summary.delta_percent is not None else None)
-        c1.metric('Flashes · últimos 10 min', f'{summary.latest_10min:,}'.replace(',', '.'),
+        c1.metric('Flashes · 0–10 min', f'{summary.latest_10min:,}'.replace(',', '.'),
                   delta=delta, delta_color='inverse')
         c2.metric('Flashes · 10–20 min', f'{summary.previous_10min:,}'.replace(',', '.'))
+        c3.metric('Flashes · 20–30 min', f'{summary.older_10min:,}'.replace(',', '.'))
         # Valor curto para não ser cortado pelo st.metric.
-        c3.metric('Tendência observada', summary.trend.replace('Relativamente estável', 'Estável'))
+        c4.metric('Tendência observada', summary.trend.replace('Relativamente estável', 'Estável'))
         if summary.stale:
             st.warning('Dados GLM desatualizados. Não é possível avaliar a atividade atual com segurança.')
         elif summary.latest_10min:

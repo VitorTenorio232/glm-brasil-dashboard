@@ -131,3 +131,30 @@ def test_tendencia_area_de_arquivo(tmp_path):
     line = {"type": "LineString", "coordinates": [[-60, -5], [-58, -3]]}
     with pytest.raises(ValueError, match="polígonos"):
         area_from_upload("linha.geojson", json.dumps(line).encode())
+
+
+def test_cartoes_da_tendencia_mostram_as_tres_janelas():
+    from src.alertas_flash import LightningActivity, render_observational_alert
+
+    shown = []
+
+    class _Col:
+        def metric(self, label, value, **kwargs):
+            shown.append((label, value))
+
+    class _Box:
+        def __enter__(self): return self
+        def __exit__(self, *exc): return False
+
+    class _St:
+        def container(self, **kwargs): return _Box()
+        def columns(self, n): return [_Col() for _ in range(n)]
+        def markdown(self, *a, **k): pass
+        def warning(self, *a, **k): pass
+        def info(self, *a, **k): pass
+        def caption(self, *a, **k): pass
+
+    summary = LightningActivity(1200, 900, 1500, "Intensificação ▲", 33.3, "ok", False)
+    render_observational_alert(_St(), summary)
+    assert shown == [("Flashes · 0–10 min", "1.200"), ("Flashes · 10–20 min", "900"),
+                     ("Flashes · 20–30 min", "1.500"), ("Tendência observada", "Intensificação ▲")]

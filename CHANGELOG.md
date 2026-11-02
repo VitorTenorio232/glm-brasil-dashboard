@@ -2,6 +2,9 @@
 
 ## 2026-11-02 (Tendência)
 
+- **Tendência — 4 cartões:** 0–10, 10–20 e 20–30 min (as três janelas da tendência) e a tendência observada;
+  antes a janela de 20–30 min era calculada mas não aparecia.
+
 - **Tendência — opção Arquivo:** área de um shapefile (ZIP), KML, KMZ ou GeoJSON (até 20 MB; usa os polígonos),
   ou reaproveita a área já importada na aba ao vivo.
 
