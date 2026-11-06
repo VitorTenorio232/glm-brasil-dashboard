@@ -129,7 +129,10 @@ def rank_dataframe(
         group_cols = ["state_abbrev", "state_name", "latitude", "longitude", "area_km2"]
 
     out = work.groupby(group_cols, as_index=False, dropna=False)["flash_count"].sum()
+    # A contagem vem da fração de área de cada célula: a densidade usa o valor exato
+    # e a tabela mostra a contagem arredondada.
     out["flash_density"] = out["flash_count"] / out["area_km2"]
+    out["flash_count"] = out["flash_count"].round().astype("int64")
     out = out.sort_values(metric, ascending=False).head(int(top_n)).reset_index(drop=True)
     out.insert(0, "rank", range(1, len(out) + 1))
     return out

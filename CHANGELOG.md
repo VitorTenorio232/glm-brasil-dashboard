@@ -1,5 +1,15 @@
 # Histórico de mudanças
 
+## 2026-11-06 (municípios pequenos)
+
+### Correções
+- **Ranking e séries por fração de área:** cada célula de 0,08° passa a ser dividida entre os municípios pela
+  fração da sua área, em vez de ir inteira para o município que contém o seu centro. Municípios menores que uma
+  célula ficavam com zero ou com a densidade inflada: Santa Cruz de Minas (MG, 3,6 km²) aparecia com
+  217 flashes/km² em 2025 e agora tem 10,6 (vizinhos: 9–13); os municípios com zero flashes em 2025 caíram de 178
+  para 17. Totais do Brasil e o ranking dos estados não mudam. Os rankings 2020–2025 em `05_RANKINGS` foram
+  refeitos com o novo `build_glm_admin_rankings.py`.
+
 ## 2026-11-02 (Tendência)
 
 - **Tendência — 4 cartões:** 0–10, 10–20 e 20–30 min (as três janelas da tendência) e a tendência observada;

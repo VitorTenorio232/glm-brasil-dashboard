@@ -377,41 +377,79 @@ class HistoricalGLMRepository:
     # Séries temporais espaciais
     # ------------------------------------------------------------------
     @staticmethod
-    def _grid_subset_for_geometry(lat: np.ndarray, lon: np.ndarray, geometry):
+    def _half_cell(lat: np.ndarray, lon: np.ndarray) -> tuple[float, float]:
+        hy = abs(float(np.median(np.diff(lat)))) / 2 if len(lat) > 1 else 0.04
+        hx = abs(float(np.median(np.diff(lon)))) / 2 if len(lon) > 1 else 0.04
+        return hy, hx
+
+    @classmethod
+    def _grid_subset_for_geometry(cls, lat: np.ndarray, lon: np.ndarray, geometry):
+        # Meia célula de margem: entram as células que tocam a área mesmo com o centro fora dela.
         minx, miny, maxx, maxy = geometry.bounds
-        lat_idx = np.where((lat >= miny) & (lat <= maxy))[0]
-        lon_idx = np.where((lon >= minx) & (lon <= maxx))[0]
+        hy, hx = cls._half_cell(lat, lon)
+        lat_idx = np.where((lat >= miny - hy) & (lat <= maxy + hy))[0]
+        lon_idx = np.where((lon >= minx - hx) & (lon <= maxx + hx))[0]
         if lat_idx.size == 0 or lon_idx.size == 0:
             return None
         return lat_idx, lon_idx
 
-    @staticmethod
-    def _geometry_mask(lat: np.ndarray, lon: np.ndarray, geometry) -> np.ndarray:
-        from shapely import contains_xy, intersects_xy
+    @classmethod
+    def _geometry_weights(cls, lat: np.ndarray, lon: np.ndarray, geometry, samples: int = 20) -> np.ndarray:
+        """Fração da área de cada célula que cai dentro da geometria (0 a 1).
 
+        Células sem contato com o contorno valem 1 (dentro) ou 0 (fora); as que cruzam
+        o contorno são amostradas numa malha de ``samples`` × ``samples`` pontos.
+        Antes, cada célula entrava inteira ou não entrava, conforme o centro: um
+        município menor que uma célula (ex.: Santa Cruz de Minas, 3,6 km² numa célula
+        de ~74 km²) recebia a célula inteira ou nada.
+        """
+        import shapely
+
+        hy, hx = cls._half_cell(lat, lon)
         xx, yy = np.meshgrid(lon, lat)
-        mask = contains_xy(geometry, xx, yy)
-        # inclui centros exatamente sobre o contorno, caso existam
-        try:
-            mask = mask | intersects_xy(geometry.boundary, xx, yy)
-        except Exception:
-            pass
-        return np.asarray(mask, dtype=bool)
+        shapely.prepare(geometry)
+        center = shapely.contains_xy(geometry, xx, yy)
+        weights = center.astype(np.float64)
+        # Uma célula cruza o contorno se o centro e os cantos discordam (uns dentro, outros
+        # fora) ou se ela contém algum vértice do contorno — caso de áreas menores que a célula.
+        tests = [center] + [shapely.contains_xy(geometry, xx + sx * hx, yy + sy * hy)
+                            for sx, sy in ((-1, -1), (-1, 1), (1, -1), (1, 1))]
+        tests = np.stack(tests)
+        crossing = tests.any(axis=0) & ~tests.all(axis=0)
+        vx, vy = shapely.get_coordinates(geometry.boundary).T
+        fy = (vy - lat[0]) / (2 * hy * (np.sign(lat[-1] - lat[0]) or 1)) + 0.5
+        fx = (vx - lon[0]) / (2 * hx * (np.sign(lon[-1] - lon[0]) or 1)) + 0.5
+        # Um vértice sobre a linha entre duas células (a menos do erro de ponto flutuante)
+        # marca as duas.
+        eps = 1e-6
+        for iy in (np.floor(fy - eps).astype(int), np.floor(fy + eps).astype(int)):
+            for ix in (np.floor(fx - eps).astype(int), np.floor(fx + eps).astype(int)):
+                ok = (iy >= 0) & (iy < len(lat)) & (ix >= 0) & (ix < len(lon))
+                crossing[iy[ok], ix[ok]] = True
+        if np.any(crossing):
+            step = (np.arange(samples) + 0.5) / samples
+            ox, oy = np.meshgrid(-hx + 2 * hx * step, -hy + 2 * hy * step)
+            px = xx[crossing][:, None] + ox.ravel()[None, :]
+            py = yy[crossing][:, None] + oy.ravel()[None, :]
+            weights[crossing] = shapely.contains_xy(geometry, px, py).mean(axis=1)
+        return weights
 
     @staticmethod
-    def _aggregate_region(data: np.ndarray, count: np.ndarray, mask: np.ndarray, variable: str) -> float:
-        if not np.any(mask):
+    def _aggregate_region(data: np.ndarray, count: np.ndarray, weights: np.ndarray, variable: str) -> float:
+        """Soma (contagem) ou média ponderada (demais variáveis) com o peso de área de cada célula."""
+        use = np.asarray(weights) > 0
+        if not np.any(use):
             return float("nan")
+        w = np.asarray(weights, dtype=np.float64)[use]
+        vals = data[use]
         if variable == "flash_count":
-            vals = data[mask]
-            return float(np.nansum(vals)) if np.isfinite(vals).any() else float("nan")
+            return float(np.nansum(vals * w)) if np.isfinite(vals).any() else float("nan")
 
-        vals = data[mask]
-        weights = count[mask]
-        good = np.isfinite(vals) & np.isfinite(weights) & (weights > 0)
+        cw = count[use] * w
+        good = np.isfinite(vals) & np.isfinite(cw) & (cw > 0)
         if not np.any(good):
             return float("nan")
-        return float(np.sum(vals[good] * weights[good]) / np.sum(weights[good]))
+        return float(np.sum(vals[good] * cw[good]) / np.sum(cw[good]))
 
     def series_for_geometry(
         self,
@@ -451,7 +489,7 @@ class HistoricalGLMRepository:
             return pd.DataFrame(columns=["date", "year", "month", "day", "value", "relpath"])
 
         rows = []
-        cached_mask = None
+        cached_weights = None
         cached_signature = None
 
         for item in items:
@@ -467,12 +505,12 @@ class HistoricalGLMRepository:
                     float(lat_sub[0]), float(lat_sub[-1]), len(lat_sub),
                     float(lon_sub[0]), float(lon_sub[-1]), len(lon_sub),
                 )
-                if cached_mask is None or signature != cached_signature:
-                    cached_mask = self._geometry_mask(lat_sub, lon_sub, geometry)
+                if cached_weights is None or signature != cached_signature:
+                    cached_weights = self._geometry_weights(lat_sub, lon_sub, geometry)
                     cached_signature = signature
                 data_sub = data[np.ix_(lat_idx, lon_idx)]
                 count_sub = count[np.ix_(lat_idx, lon_idx)]
-                value = self._aggregate_region(data_sub, count_sub, cached_mask, variable)
+                value = self._aggregate_region(data_sub, count_sub, cached_weights, variable)
 
             rows.append({
                 "date": item.date,

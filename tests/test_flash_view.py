@@ -60,6 +60,30 @@ def test_anomaly_range_is_symmetric():
     assert anomaly_range(np.zeros(4)) == (-1.0, 1.0)
 
 
+def test_municipio_menor_que_a_celula_recebe_so_a_fracao_de_area():
+    # Caso Santa Cruz de Minas: área bem menor que uma célula de 0,08° com o centro dentro.
+    from shapely.geometry import box
+    from src.historical_glm import HistoricalGLMRepository as R
+    from src.ranking_glm import rank_dataframe
+
+    lat = np.array([-21.20, -21.12, -21.04])
+    lon = np.array([-44.28, -44.20, -44.12])
+    pequeno = box(-44.204, -21.16, -44.200, -21.08)  # 5% da célula central, contendo o centro
+    pesos = R._geometry_weights(lat, lon, pequeno)
+    assert np.isclose(pesos.sum(), 0.05, atol=0.005)
+    contagem = np.full((3, 3), 800.0)
+    assert np.isclose(R._aggregate_region(contagem, contagem, pesos, "flash_count"), 40.0, atol=4)
+    assert R._geometry_weights(lat, lon, box(-44.30, -21.24, -44.10, -21.00))[1, 1] == 1.0
+
+    df = pd.DataFrame({"time": ["2025-01-01"] * 2, "municipality_code": [1, 2], "municipality_name": ["A", "B"],
+                       "state_abbrev": ["MG", "MG"], "state_name": ["Minas Gerais"] * 2, "latitude": [0.0, 0.0],
+                       "longitude": [0.0, 0.0], "area_km2": [3.6, 80.0], "flash_count": [38.3, 900.4]})
+    out = rank_dataframe(df, level="municipality", start="2025-01-01", end="2025-12-31")
+    assert list(out["municipality_name"]) == ["B", "A"]
+    assert np.isclose(out.loc[out["municipality_name"] == "A", "flash_density"].iloc[0], 38.3 / 3.6)
+    assert out["flash_count"].dtype.kind == "i"
+
+
 def test_activity_trend_windows():
     end = datetime(2026, 10, 26, 21, 0, tzinfo=timezone.utc)
     times = ([end - timedelta(minutes=2)] * 12 + [end - timedelta(minutes=15)] * 4)

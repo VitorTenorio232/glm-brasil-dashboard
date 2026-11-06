@@ -29,15 +29,15 @@ Também cria Parquet equivalentes, úteis para o dashboard.
 
 Metodologia espacial
 --------------------
-Cada célula da grade GLM é atribuída ao município que contém o CENTRO da célula.
-A associação espacial é calculada uma única vez e reutilizada para todos os
-arquivos da mesma grade. Isso torna o processamento muito rápido.
+Cada célula da grade GLM é dividida entre os municípios pela fração da sua área
+que cai em cada um (as contagens de uma célula na fronteira entram em parte em
+cada lado). A associação espacial é calculada uma única vez e reutilizada para
+todos os arquivos da mesma grade.
 
 Atenção:
-    Para municípios muito pequenos ou fronteiriços, essa abordagem é uma
-    aproximação da grade (~0,08° no banco atual). Para uma versão futura mais
-    rigorosa, pode-se usar ponderação pela fração de área de cada célula dentro
-    de cada município.
+    A divisão supõe flashes distribuídos de modo uniforme dentro da célula
+    (~0,08°). Em municípios menores que uma célula, o valor é uma estimativa
+    proporcional à área, e não uma contagem de flashes observados no município.
 
 Uso
 ---
@@ -89,10 +89,12 @@ DATE_REGEX = {
 
 @dataclass
 class GridLookup:
+    """Fração da área de cada célula que cai em cada município (pares esparsos)."""
     lat: np.ndarray
     lon: np.ndarray
+    cell_index: np.ndarray       # índice achatado da célula (lat * nlon + lon)
     municipality_index: np.ndarray
-    state_index: np.ndarray
+    weight: np.ndarray           # fração da área da célula dentro do município (0–1)
 
 
 # =============================================================================
@@ -259,115 +261,86 @@ def _cache_filename(lat: np.ndarray, lon: np.ndarray, cache_dir: Path) -> Path:
         f"{lat[0]:.5f}_{lat[-1]:.5f}_"
         f"{lon[0]:.5f}_{lon[-1]:.5f}"
     ).replace("-", "m").replace(".", "p")
-    return cache_dir / f"glm_admin_lookup_{key}.npz"
+    # "areafrac" separa este cache do antigo (atribuição pelo centro da célula).
+    return cache_dir / f"glm_admin_lookup_areafrac_{key}.npz"
 
 
 def _make_grid_lookup(
     lat: np.ndarray,
     lon: np.ndarray,
     muni: gpd.GeoDataFrame,
-    states: gpd.GeoDataFrame,
     cache_dir: Path,
     force: bool = False,
 ) -> GridLookup:
+    """Divide cada célula entre os municípios pela fração de área que cai em cada um.
+
+    A antiga atribuição pelo centro da célula dava a célula inteira (~70 km²) a um
+    único município: municípios menores que uma célula ficavam com zero ou com a
+    densidade inflada (ex.: Santa Cruz de Minas, 3,6 km², recebia 100% de uma
+    célula de 73,6 km²). A fração é a razão entre a área da interseção e a área da
+    célula, calculada em graus, o que é preciso para células de 0,08°.
+    """
+    import shapely
+
     cache_dir.mkdir(parents=True, exist_ok=True)
     cache = _cache_filename(lat, lon, cache_dir)
 
     if cache.exists() and not force:
         data = np.load(cache)
         return GridLookup(
-            lat=data["lat"],
-            lon=data["lon"],
-            municipality_index=data["municipality_index"],
-            state_index=data["state_index"],
+            lat=data["lat"], lon=data["lon"], cell_index=data["cell_index"],
+            municipality_index=data["municipality_index"], weight=data["weight"],
         )
 
-    print("Criando associação espacial grade GLM -> municípios...")
+    print("Calculando a fração de área de cada célula em cada município...")
     print("Esta etapa é feita apenas uma vez para esta grade.")
 
-    # Vetores achatados da grade inteira.
-    nlat, nlon = len(lat), len(lon)
-    total_cells = nlat * nlon
-    muni_index_full = np.full(total_cells, -1, dtype=np.int32)
-    state_index_full = np.full(total_cells, -1, dtype=np.int16)
+    nlon = len(lon)
+    dx = abs(float(np.median(np.diff(lon))))
+    dy = abs(float(np.median(np.diff(lat))))
 
-    # Reduz a criação de pontos ao bbox do Brasil + pequena margem.
+    # Células cujo retângulo pode tocar o Brasil.
     minx, miny, maxx, maxy = muni.total_bounds
-    lat_idx = np.where((lat >= miny - 0.2) & (lat <= maxy + 0.2))[0]
-    lon_idx = np.where((lon >= minx - 0.2) & (lon <= maxx + 0.2))[0]
-
+    lat_idx = np.where((lat + dy / 2 >= miny) & (lat - dy / 2 <= maxy))[0]
+    lon_idx = np.where((lon + dx / 2 >= minx) & (lon - dx / 2 <= maxx))[0]
     yy, xx = np.meshgrid(lat_idx, lon_idx, indexing="ij")
-    flat_indices = (yy * nlon + xx).ravel()
+    flat_cells = (yy * nlon + xx).ravel().astype(np.int64)
+    cx, cy = lon[xx.ravel()], lat[yy.ravel()]
+    boxes = shapely.box(cx - dx / 2, cy - dy / 2, cx + dx / 2, cy + dy / 2)
 
-    point_lat = lat[yy.ravel()]
-    point_lon = lon[xx.ravel()]
+    geoms = muni.geometry.to_numpy()
+    tree = shapely.STRtree(geoms)
+    box_i, muni_i = tree.query(boxes, predicate="intersects")
 
-    points = gpd.GeoDataFrame(
-        {"flat_index": flat_indices},
-        geometry=gpd.points_from_xy(point_lon, point_lat),
-        crs="EPSG:4326",
+    # Células inteiramente dentro de um município recebem peso 1 sem calcular interseção.
+    shapely.prepare(geoms)
+    inside = shapely.contains_properly(geoms[muni_i], boxes[box_i])
+    weight = np.ones(len(box_i), dtype=np.float64)
+    edge = ~inside
+    cell_area = dx * dy
+    weight[edge] = shapely.area(shapely.intersection(boxes[box_i[edge]], geoms[muni_i[edge]])) / cell_area
+
+    keep = weight > 1e-9
+    lookup = GridLookup(
+        lat=lat, lon=lon,
+        cell_index=flat_cells[box_i[keep]],
+        municipality_index=muni["municipality_index"].to_numpy(dtype=np.int32)[muni_i[keep]],
+        weight=np.clip(weight[keep], 0.0, 1.0),
     )
-
-    join_cols = ["municipality_index", "abbrev_state", "geometry"]
-    joined = gpd.sjoin(
-        points,
-        muni[join_cols],
-        how="left",
-        predicate="within",
-    )
-
-    # Em fronteiras exatas um ponto pode ficar sem município. Tenta intersects
-    # apenas nesses poucos casos.
-    missing = joined["municipality_index"].isna()
-    if missing.any():
-        retry = gpd.sjoin(
-            joined.loc[missing, ["flat_index", "geometry"]],
-            muni[join_cols],
-            how="left",
-            predicate="intersects",
-        )
-        retry = retry[retry["municipality_index"].notna()]
-        retry = retry[~retry.index.duplicated(keep="first")]
-        joined.loc[retry.index, "municipality_index"] = retry["municipality_index"]
-        joined.loc[retry.index, "abbrev_state"] = retry["abbrev_state"]
-
-    joined = joined[joined["municipality_index"].notna()].copy()
-    joined = joined[~joined["flat_index"].duplicated(keep="first")]
-
-    flat = joined["flat_index"].to_numpy(dtype=np.int64)
-    muni_idx = joined["municipality_index"].to_numpy(dtype=np.int32)
-    muni_index_full[flat] = muni_idx
-
-    state_map = dict(zip(states["abbrev_state"], states["state_index"]))
-    st_idx = joined["abbrev_state"].map(state_map).to_numpy()
-    valid_state = pd.notna(st_idx)
-    state_index_full[flat[valid_state]] = st_idx[valid_state].astype(np.int16)
-
-    municipality_index = muni_index_full.reshape(nlat, nlon)
-    state_index = state_index_full.reshape(nlat, nlon)
 
     np.savez_compressed(
-        cache,
-        lat=lat.astype(np.float32),
-        lon=lon.astype(np.float32),
-        municipality_index=municipality_index,
-        state_index=state_index,
+        cache, lat=lat.astype(np.float32), lon=lon.astype(np.float32),
+        cell_index=lookup.cell_index, municipality_index=lookup.municipality_index, weight=lookup.weight,
     )
-
-    print(f"Lookup salvo em: {cache}")
-
-    return GridLookup(
-        lat=lat,
-        lon=lon,
-        municipality_index=municipality_index,
-        state_index=state_index,
-    )
+    print(f"Lookup salvo em: {cache} ({len(lookup.weight):,} pares célula-município)")
+    return lookup
 
 
 def _aggregate_one_file(
     path: Path,
     lookup: GridLookup,
     n_muni: int,
+    muni_state_index: np.ndarray,
     n_states: int,
 ) -> tuple[np.ndarray, np.ndarray]:
     with xr.open_dataset(path) as ds:
@@ -382,30 +355,23 @@ def _aggregate_one_file(
 
         arr = np.asarray(da.values, dtype=np.float64)
 
-    if arr.shape != lookup.municipality_index.shape:
+    if arr.shape != (len(lookup.lat), len(lookup.lon)):
         raise ValueError(
             f"Grade incompatível em {path.name}: "
-            f"{arr.shape} != {lookup.municipality_index.shape}"
+            f"{arr.shape} != {(len(lookup.lat), len(lookup.lon))}"
         )
 
     arr = np.nan_to_num(arr, nan=0.0, posinf=0.0, neginf=0.0)
     flat_values = arr.ravel()
 
-    muni_idx = lookup.municipality_index.ravel()
-    valid_muni = muni_idx >= 0
+    # Cada célula contribui na proporção da sua área dentro de cada município.
     muni_sum = np.bincount(
-        muni_idx[valid_muni],
-        weights=flat_values[valid_muni],
+        lookup.municipality_index,
+        weights=flat_values[lookup.cell_index] * lookup.weight,
         minlength=n_muni,
     )
-
-    state_idx = lookup.state_index.ravel()
-    valid_state = state_idx >= 0
-    state_sum = np.bincount(
-        state_idx[valid_state],
-        weights=flat_values[valid_state],
-        minlength=n_states,
-    )
+    # Estados = soma dos seus municípios (as frações já repartem as células de fronteira).
+    state_sum = np.bincount(muni_state_index, weights=muni_sum, minlength=n_states)
 
     return muni_sum, state_sum
 
@@ -425,18 +391,17 @@ def _write_municipality_dataset(
     muni: gpd.GeoDataFrame,
     scale: str,
 ) -> xr.Dataset:
-    counts_int = np.rint(counts).astype(np.int64)
     density = counts / muni["area_km2"].to_numpy()[None, :]
 
     ds = xr.Dataset(
         data_vars={
             "flash_count": (
                 ("time", "municipality"),
-                counts_int,
+                np.round(counts, 2).astype(np.float32),
                 {
                     "long_name": "GLM flash count assigned to municipality",
                     "units": "count",
-                    "aggregation": "sum of gridded flash_count cells assigned by cell center",
+                    "aggregation": "sum of gridded flash_count weighted by the fraction of each cell's area inside the municipality",
                 },
             ),
             "flash_density": (
@@ -490,11 +455,11 @@ def _write_municipality_dataset(
         },
         attrs={
             "title": f"Flash View - GLM municipal ranking ({scale})",
-            "spatial_assignment": "GLM grid-cell center assigned to municipality polygon",
+            "spatial_assignment": "GLM grid cells split among municipalities by area fraction",
             "source_variable": "flash_count",
             "note": (
-                "Boundary uncertainty follows the spatial resolution of the gridded GLM product. "
-                "Small municipalities can be sensitive to cell-center assignment."
+                "Counts assume flashes are spread evenly inside each 0.08 degree cell; "
+                "values for municipalities smaller than a cell are area-weighted estimates."
             ),
         },
     )
@@ -514,14 +479,13 @@ def _write_state_dataset(
     states: gpd.GeoDataFrame,
     scale: str,
 ) -> xr.Dataset:
-    counts_int = np.rint(counts).astype(np.int64)
     density = counts / states["area_km2"].to_numpy()[None, :]
 
     ds = xr.Dataset(
         data_vars={
             "flash_count": (
                 ("time", "state"),
-                counts_int,
+                np.round(counts, 2).astype(np.float32),
                 {"long_name": "GLM flash count assigned to state", "units": "count"},
             ),
             "flash_density": (
@@ -561,7 +525,7 @@ def _write_state_dataset(
         },
         attrs={
             "title": f"Flash View - GLM state ranking ({scale})",
-            "spatial_assignment": "GLM grid-cell center assigned to municipality/state polygon",
+            "spatial_assignment": "GLM grid cells split among municipalities by area fraction, summed by state",
             "source_variable": "flash_count",
         },
     )
@@ -592,9 +556,10 @@ def _write_parquet_municipality(
             "latitude": muni["latitude"].to_numpy(dtype=np.float32),
             "longitude": muni["longitude"].to_numpy(dtype=np.float32),
             "area_km2": muni["area_km2"].to_numpy(dtype=np.float32),
-            "flash_count": np.rint(counts[i]).astype(np.int64),
+            # Fração de células: a contagem deixa de ser inteira em municípios pequenos.
+            "flash_count": np.round(counts[i], 2),
         })
-        df["flash_density"] = df["flash_count"] / df["area_km2"]
+        df["flash_density"] = counts[i] / muni["area_km2"].to_numpy()
         df["scale"] = scale
         frames.append(df)
 
@@ -617,9 +582,9 @@ def _write_parquet_state(
             "latitude": states["latitude"].to_numpy(dtype=np.float32),
             "longitude": states["longitude"].to_numpy(dtype=np.float32),
             "area_km2": states["area_km2"].to_numpy(dtype=np.float32),
-            "flash_count": np.rint(counts[i]).astype(np.int64),
+            "flash_count": np.round(counts[i], 2),
         })
-        df["flash_density"] = df["flash_count"] / df["area_km2"]
+        df["flash_density"] = counts[i] / states["area_km2"].to_numpy()
         df["scale"] = scale
         frames.append(df)
 
@@ -657,10 +622,11 @@ def process_scale(
         lat=lat,
         lon=lon,
         muni=muni,
-        states=states,
         cache_dir=cache_dir,
         force=force_lookup,
     )
+    state_of = dict(zip(states["abbrev_state"], states["state_index"]))
+    muni_state_index = muni["abbrev_state"].map(state_of).to_numpy(dtype=np.int64)
 
     muni_counts = np.zeros((len(files), len(muni)), dtype=np.float64)
     state_counts = np.zeros((len(files), len(states)), dtype=np.float64)
@@ -671,6 +637,7 @@ def process_scale(
             path,
             lookup,
             n_muni=len(muni),
+            muni_state_index=muni_state_index,
             n_states=len(states),
         )
         muni_counts[i, :] = msum

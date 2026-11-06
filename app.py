@@ -462,7 +462,8 @@ def _spatial_details(spatial_level: str, prefix: str) -> tuple[dict, bool]:
         with c2:
             chosen_muni = st.selectbox("Município", list(mlookup), key=f"{prefix}_muni")
         payload.update(uf=uf, code_muni=mlookup[chosen_muni], location_label=chosen_muni)
-        st.caption("O recorte municipal usa os centros das células da grade (~0,08°).")
+        st.caption("No mapa, o recorte usa os centros das células da grade (~0,08°); na série temporal, "
+                   "cada célula entra pela fração da sua área dentro do município.")
         return payload, valid
 
     if spatial_level == "Retângulo":
@@ -1816,7 +1817,8 @@ if tab_series.open:
                             if series_variable == "flash_count":
                                 st.caption(
                                     "Para número de flashes, cada ponto da série é a **soma** de `flash_count` "
-                                    "das células incluídas na área selecionada."
+                                    "das células da área selecionada; as células que cruzam o limite entram pela "
+                                    "fração da sua área dentro dele."
                                 )
                             else:
                                 st.caption(
@@ -1841,7 +1843,8 @@ if tab_rank.open:
         st.markdown('<div class="section-heading">Ranking de incidência de relâmpagos</div>', unsafe_allow_html=True)
         st.caption(
             "Ranking calculado a partir de produtos administrativos pré-processados. "
-            "Isso evita varrer milhares de NetCDF durante o acesso ao site."
+            "Cada célula da grade (~0,08°) é dividida entre os municípios pela fração da sua área; "
+            "em municípios menores que uma célula, o valor é uma estimativa proporcional à área."
         )
         st.info(
             "💡 Para comparar municípios ou estados de tamanhos diferentes, a métrica recomendada é "
