@@ -3,6 +3,12 @@
 ## 2026-11-07 (alarme)
 
 ### Novidades
+- **Área no mapa ao vivo, como na Tendência:** a barra **Área no mapa** troca o botão "Selecionar Área" e o
+  "Importar área" de baixo do mapa por cinco tipos: **Pontual** (clique no mapa, coordenadas ou município, com
+  raio de 5 a 100 km), **Retângulo** (agora é só arrastar no mapa; dois cliques continuam valendo; ou digitar os
+  limites), **Estados**, **Municípios** e **Arquivo** (SHP em ZIP, KML, KMZ, GeoJSON). Um aviso amarelo no mapa
+  diz o que fazer, e a área escolhida filtra os números e é a área do alarme. Em telas estreitas as barras de
+  área (ao vivo e Tendência) quebram em duas linhas. Código em `src/area_ao_vivo.py`.
 - **Botão "Ativar alarme" no mapa ao vivo:** com uma área selecionada (retângulo ou polígono importado), o site
   toca uma sirene em loop e cobre a tela com um aviso vermelho quando cai relâmpago na área (distância e
   direção do mais perto, total em 10 min e horário), até clicar em "Parar alarme". Pisca o título da aba, mostra

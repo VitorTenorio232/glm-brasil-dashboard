@@ -17,7 +17,9 @@
 .fv-map-legend b {margin-bottom:2px;}
 .fv-map-legend span{display:flex;align-items:center;gap:5px;}
 .fv-map-legend i{width:10px;height:10px;border-radius:50%;display:inline-block;}
-.fv-map-shell.fv-map-drawing .fv-map-canvas{cursor:crosshair !important;}
+.fv-map-shell.fv-map-drawing .fv-map-canvas,.fv-map-shell.fv-map-drawing .maplibregl-canvas-container.maplibregl-interactive{cursor:crosshair !important;}
+.fv-map-hint{position:absolute;top:12px;left:50%;transform:translateX(-50%);z-index:5;max-width:min(520px,calc(100% - 120px));background:#ffe359;color:#071522;font-weight:700;font-size:13px;border-radius:8px;padding:8px 14px;box-shadow:0 4px 18px rgba(0,0,0,.45);text-align:center;pointer-events:none;}
+.fv-map-hint[data-hidden="true"]{display:none;}
 @media(max-width:700px){.fv-map-shell{height:720px}.fv-map-canvas{bottom:160px}.fv-map-timeline{height:158px}.fv-map-frame-label{margin-left:0;text-align:left}.fv-map-legend{top:58px;right:12px}.fv-map-hud{right:12px;left:auto}.fv-map-controls button{font-size:11px;min-height:28px}}
 
 /* MapLibre V8.3: agrupamentos multicor e símbolos de raios. */
@@ -35,4 +37,4 @@
 .fv-map-alarm.fv-alarm-on button[data-alarm="toggle"]{background:#7f1d1d;border-color:#ff5a4f;color:#fff;}
 .fv-map-alarm.fv-alarm-warn{border-color:#f4b942;}
 .fv-map-alarm-status{flex-basis:100%;font-size:11px;color:#c9d8e6;line-height:1.3;}
-@media(max-width:700px){.fv-map-alarm{top:auto;bottom:172px;max-width:calc(100% - 24px);}}
+@media(max-width:700px){.fv-map-alarm{top:auto;bottom:172px;max-width:calc(100% - 24px);}.fv-map-hint{top:auto;bottom:250px;max-width:calc(100% - 24px);font-size:12px;}}

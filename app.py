@@ -18,6 +18,8 @@ from streamlit_folium import st_folium
 from src.realtime_glm import AGE_GROUPS, fetch_live_snapshot, group_counts
 from src.maplibre_realtime import flash_payload, show_realtime_map
 from src.alarme import browser_alarm_payload
+from src.area_ao_vivo import (clear_live_area, live_area_mode_control, queue_map_point, queue_map_rectangle,
+                              render_live_area_panel)
 from src.previsao_flash import render_trend_tab
 from src.historical_glm import (
     ANOMALY_CMAP,
@@ -48,7 +50,6 @@ from src.spatial_tools import (
     representative_latlon,
 )
 from src.ranking_glm import RankingRepository, rank_dataframe
-from src.map_uploads import load_user_overlay
 from src.view_exports import (
     to_jpeg, render_ranking_png
 )
@@ -162,6 +163,9 @@ st.markdown(
         .metric-card-value, .time-card-value { font-size: 1.2rem; }
         .metric-card, .time-card { min-height: 0; }
         .fv-header-note { display: none; }
+        /* Barras "Área no mapa" (ao vivo) e "Tipo de análise" (Tendência): duas linhas em vez de rolar. */
+        .st-key-fv_live_area_mode [role="radiogroup"],
+        .st-key-fv_trend_area_mode [role="radiogroup"] { flex-wrap: wrap; overflow-x: visible; row-gap: 6px; }
     }
     </style>
     """,
@@ -668,24 +672,18 @@ def _live_panel():
     st.markdown('''<div class="fv-ops-strip"><span class="fv-ops-main">◉ FLASH VIEW · OPERAÇÕES</span>
         <span class="fv-ops-pill">GLM-L2-LCFA</span><span>GOES-19 • NOAA/AWS</span>
         <span class="fv-ops-muted">● Online quando há arquivos recentes • Fuso UTC/BRT</span></div>''', unsafe_allow_html=True)
-    action_text, action_refresh, action_select = st.columns([0.68, 0.16, 0.16])
-    with action_text:
-        st.caption(
-            "Atualiza sozinho a cada ~60 s. O mapa mostra os últimos 30 min; "
-            "use **▶ Reproduzir** para ver a última hora em passos de 5 min."
-        )
+    st.caption(
+        "Atualiza sozinho a cada ~60 s. O mapa mostra os últimos 30 min; "
+        "use **▶ Reproduzir** para ver a última hora em passos de 5 min."
+    )
+    # Área como na Tendência: Pontual, Retângulo, Estados, Municípios ou Arquivo (src/area_ao_vivo.py).
+    action_area, action_refresh = st.columns([0.8, 0.2], vertical_alignment="bottom")
+    with action_area:
+        area_mode = live_area_mode_control()
     with action_refresh:
         if st.button("🔄 Atualizar agora", width="stretch", key="refresh_live"):
             _load_snapshot.clear()
-    with action_select:
-        selecting = bool(st.session_state.get("live_area_select_mode", False))
-        if st.button(
-            "✚ Selecionar Área" if not selecting else "✓ Selecionando",
-            width="stretch",
-            key="select_live_area",
-        ):
-            st.session_state["live_area_select_mode"] = not selecting
-            st.rerun(scope="fragment")
+    live_area = render_live_area_panel(area_mode)
 
     try:
         with st.spinner("Buscando os dados GLM mais recentes..."):
@@ -696,19 +694,7 @@ def _live_panel():
             st.exception(exc)
         return
 
-    selected_geometry = None
-    # Área desenhada tem preferência; em seguida, polígono importado.
-    stored_wkb = st.session_state.get("live_area_wkb")
-    area_label = "o retângulo selecionado"
-    if not stored_wkb and st.session_state.get("fv_filter_uploaded_polygon", True):
-        stored_wkb = st.session_state.get("fv_user_polygon_wkb")
-        area_label = "o polígono importado"
-    if stored_wkb:
-        try:
-            from shapely import from_wkb
-            selected_geometry = from_wkb(bytes.fromhex(stored_wkb))
-        except Exception:
-            st.warning("Não foi possível carregar o polígono para filtro.")
+    selected_geometry = live_area.geometry
 
     # 60 min preservados para playback; painel atual usa 30 min.
     recent = snapshot.flashes.loc[
@@ -759,28 +745,24 @@ def _live_panel():
         )
 
     if selected_geometry is not None:
-        info_col, clear_col = st.columns([0.84, 0.16])
+        info_col, clear_col = st.columns([0.84, 0.16], vertical_alignment="center")
         with info_col:
-            st.success(f"Área aplicada ao tempo real: {len(display_flashes):,} flashes na janela atual.".replace(",", "."))
+            st.success(f"Área aplicada ao tempo real ({live_area.label}): "
+                       f"{_fmt_int(len(display_flashes))} flashes na janela atual.")
         with clear_col:
-            if st.button("✖ Limpar área", width="stretch", key="clear_live_area"):
-                st.session_state.pop("live_area_wkb", None)
-                st.session_state["live_area_select_mode"] = False
-                st.rerun(scope="fragment")
+            st.button("✖ Limpar área", width="stretch", key="clear_live_area", on_click=clear_live_area)
 
     st.markdown('<div class="section-heading">Mapa interativo</div>', unsafe_allow_html=True)
     if display_flashes.empty:
         st.warning("Nenhum flash foi encontrado na área selecionada durante a janela disponível.")
 
-    selecting = bool(st.session_state.get("live_area_select_mode", False))
-    if selecting:
-        st.info("Clique em dois cantos opostos do retângulo no mapa para delimitar a área.")
-
     # ==================== MapLibre persistente + reprodução JS ====================
     # O mapa e a animação nunca são recriados a cada quadro.
     # Camera (zoom/centro) gravada pelo navegador em sessionStorage, sem rerun Python.
-    from shapely.geometry import mapping, box
-    selection_json = mapping(selected_geometry) if selected_geometry is not None else None
+    from shapely.geometry import mapping
+    # Simplificada só para desenhar (municípios do IBGE têm muitos vértices); o filtro usa a original.
+    selection_json = (mapping(selected_geometry.simplify(0.001, preserve_topology=True))
+                      if selected_geometry is not None else None)
     points_js = flash_payload(hour_flashes)
     if len(hour_flashes) > len(points_js):
         st.caption(f"Exibindo {len(points_js):,} dos {len(hour_flashes):,} flashes no mapa por desempenho; "
@@ -789,8 +771,10 @@ def _live_panel():
         points_js, snapshot.observation_end_utc,
         selected_geojson=selection_json,
         uploaded_geojson=st.session_state.get("fv_user_geojson"),
-        selecting=selecting,
-        alarm=browser_alarm_payload(display_flashes, selected_geometry, label=area_label),
+        select_mode=live_area.map_mode,
+        point=live_area.point,
+        alarm=browser_alarm_payload(display_flashes, selected_geometry, label=live_area.label or "área",
+                                    reference=live_area.reference),
     )
     st.caption(
         "🔔 **Alarme:** com uma área selecionada, clique em **Ativar alarme** no mapa. Quando cair relâmpago na "
@@ -800,18 +784,19 @@ def _live_panel():
         "trocar de aba do site ou recarregar a página, ative de novo. O aviso chega ~1–3 min depois do relâmpago "
         "e não é alerta oficial."
     )
+    # Retângulo arrastado ou ponto clicado no mapa: vão para os campos da área no próximo rerun.
     rectangle = getattr(map_result, "rectangle", None)
-    if rectangle:
+    picked = getattr(map_result, "point", None)
+    if rectangle or picked:
         try:
-            west, south, east, north = (
-                float(rectangle[k]) for k in ("west", "south", "east", "north")
-            )
-            if -180 <= west < east <= 180 and -85 <= south < north <= 85:
-                st.session_state["live_area_wkb"] = box(west, south, east, north).wkb.hex()
-                st.session_state["live_area_select_mode"] = False
-                st.rerun(scope="fragment")
+            if rectangle:
+                queue_map_rectangle(rectangle)
+            else:
+                queue_map_point(picked["lat"], picked["lon"])
         except (TypeError, ValueError, KeyError):
-            st.warning("Não foi possível interpretar o retângulo selecionado.")
+            st.warning("Não foi possível usar a seleção feita no mapa.")
+        else:
+            st.rerun(scope="fragment")
 
     st.markdown('<div class="section-heading">Atividade por faixa temporal</div>', unsafe_allow_html=True)
     cols = st.columns(4)
@@ -824,84 +809,49 @@ def _live_panel():
         "Os pontos representam centroides dos flashes identificados no produto GLM-L2-LCFA."
     )
 
-    # ==================== Camadas SHP/KMZ/KML/GeoJSON ====================
-    # Fica abaixo do mapa; após um upload o fragmento é refeito para aplicar o filtro.
-    with st.expander("🗺️ Importar área (SHP/KMZ/KML/GeoJSON)", expanded=False):
-        st.caption("Shapefile: envie um ZIP com .shp, .shx, .dbf e .prj. "
-                   "Aceita também KMZ, KML e GeoJSON (até 20 MB). "
-                   "O arquivo fica somente na sua sessão; não é enviado ao GitHub/HF.")
-        if st.session_state.get("fv_user_geojson"):
-            st.success(f"Camada geográfica ativa ({len(st.session_state['fv_user_geojson']['features'])} feições).")
-            st.checkbox("Filtrar as contagens pelo polígono importado", value=True,
-                        key="fv_filter_uploaded_polygon")
-            if st.button("✖ Remover camada importada", key="fv_overlay_reset"):
-                st.session_state.pop("fv_user_geojson", None)
-                st.session_state.pop("fv_user_polygon_wkb", None)
-                st.session_state.pop("fv_uploaded_digest", None)
-                st.session_state["fv_upload_version"] = int(st.session_state.get("fv_upload_version", 0))+1
-                st.rerun(scope="fragment")
-        uploaded = st.file_uploader(
-            "Escolha a geometria", type=["zip", "kmz", "kml", "geojson", "json"],
-            key=f"fv_geo_upload_{st.session_state.get('fv_upload_version',0)}"
-        )
-        if uploaded is not None:
-            import hashlib
-            blob = uploaded.getvalue()
-            digest = hashlib.sha256(blob).hexdigest()
-            if digest != st.session_state.get("fv_uploaded_digest"):
-                try:
-                    geojson, polygon, nfeat = load_user_overlay(uploaded.name, blob)
-                    st.session_state["fv_user_geojson"] = geojson
-                    st.session_state["fv_user_polygon_wkb"] = polygon.wkb.hex() if polygon is not None else None
-                    st.session_state["fv_uploaded_digest"] = digest
-                    st.toast(f"Camada carregada: {nfeat} feição(ões).")
-                    st.rerun(scope="fragment")
-                except Exception as exc:
-                    st.error(f"Não foi possível ler a geometria: {exc}")
-
     # Flash View V9.2 — exportação recolhida sob Atividade por faixa temporal
     with st.expander("Exportação", expanded=False):
         # ==================== Pranchas PNG/JPEG e GIF GLM ====================
         st.caption("Escolha uma área exclusiva para a imagem, sem alterar o mapa em tempo real. "
                    "O PNG/JPEG usa o snapshot GLM já carregado.")
-        live_area = export_area_selector(prefix="fv_live", applied_geom=selected_geometry,
-                                         applied_label="Área atual no mapa" if selected_geometry is not None else "América do Sul")
+        export_area = export_area_selector(prefix="fv_live", applied_geom=selected_geometry,
+                                           applied_label=live_area.label if selected_geometry is not None else "América do Sul")
         live_w = 1920  # resolução técnica fixa; controle não exibido
         live_bg = st.selectbox("Fundo da imagem", list(BASEMAPS), index=list(BASEMAPS).index("satellite"),
              format_func=lambda x: BASEMAPS[x]["title"], key="fv_live_export_bg")
-        live_key = (str(snapshot.observation_end_utc), live_area.signature if live_area else None,
+        live_key = (str(snapshot.observation_end_utc), export_area.signature if export_area else None,
                     live_w, live_bg)
         lc1, lc2 = st.columns(2)
         with lc1:
-            if st.button("🗺️ Preparar PNG/JPEG", key="fv_live_prepare_board",disabled=live_area is None):
+            if st.button("🗺️ Preparar PNG/JPEG", key="fv_live_prepare_board",disabled=export_area is None):
                 try:
-                    meta_live = BoardMeta(product="Flashes observados — GLM", region=live_area.label,
+                    meta_live = BoardMeta(product="Flashes observados — GLM", region=export_area.label,
                         period=f"Últimos 30 min até {snapshot.observation_end_utc:%d/%m/%Y %H:%M} UTC",
                         reference_utc=snapshot.observation_end_utc,
                         resolution="Posição geográfica dos flashes GLM", basemap=live_bg)
                     with st.spinner("Compondo prancha e carregando mapa-base..."):
                         png = render_flash_board(snapshot.flashes, meta=meta_live,
-                            geometry=live_area.geometry, observation_end=snapshot.observation_end_utc,
+                            geometry=export_area.geometry, observation_end=snapshot.observation_end_utc,
                             width=live_w, overlay_geojson=st.session_state.get("fv_user_geojson"))
                     st.session_state["fv_live_board"] = {
-                        "key":live_key,"png":png,"name":safe_name("tempo_real",live_area.label,
+                        "key":live_key,"png":png,"name":safe_name("tempo_real",export_area.label,
                             snapshot.observation_end_utc.strftime("%Y%m%dT%H%MZ"))}
                 except Exception as e:
                     st.error(f"Não foi possível gerar a imagem: {e}")
         with lc2:
-            if st.button("🎞️ Preparar GIF (1 h)",key="fv_live_prepare_gif", disabled=live_area is None):
+            if st.button("🎞️ Preparar GIF (1 h)",key="fv_live_prepare_gif", disabled=export_area is None):
                 # Cada quadro tem fundo cartográfico + shapes + janela móvel de 30 min.
                 # Falha de tiles é informada; nunca baixar GIF sem o mapa-base.
                 try:
                     gif_meta = BoardMeta(
-                        product="Evolução de flashes — GLM", region=live_area.label,
+                        product="Evolução de flashes — GLM", region=export_area.label,
                         period=f"Última hora até {snapshot.observation_end_utc:%d/%m/%Y %H:%M} UTC",
                         reference_utc=snapshot.observation_end_utc,
                         resolution="Flashes GLM • janelas móveis de 30 minutos", basemap=live_bg)
                     with st.spinner("Montando GIF com satélite/mapa-base e limites geográficos..."):
                         gif = render_glm_board_gif(
                             snapshot.flashes, snapshot.observation_end_utc, meta=gif_meta,
-                            geometry=live_area.geometry,
+                            geometry=export_area.geometry,
                             overlay_geojson=st.session_state.get("fv_user_geojson"))
                     st.session_state["fv_live_gif_export"] = {"key": live_key, "gif": gif}
                 except Exception as exc:
@@ -920,7 +870,7 @@ def _live_panel():
         gif_export = st.session_state.get("fv_live_gif_export")
         if isinstance(gif_export, dict) and gif_export.get("key") == live_key:
             st.download_button("⬇️ GIF animado (última hora)",gif_export["gif"],
-                file_name=safe_name("tempo_real_gif",live_area.label,
+                file_name=safe_name("tempo_real_gif",export_area.label,
                     snapshot.observation_end_utc.strftime("%Y%m%dT%H%MZ"),extension="gif"),
                 mime="image/gif",key="fv_live_dl_gif",on_click="ignore")
         elif gif_export:

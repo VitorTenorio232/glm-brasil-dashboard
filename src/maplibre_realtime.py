@@ -62,7 +62,7 @@ def _maplibre_component():
     """Registro de componente v2, com recursos JS/CSS estáticos e confiáveis."""
     return st.components.v2.component(
         name="flash_view_live_maplibre_v83",
-        html='<div class="fv-map-shell"><div class="fv-map-canvas"></div><div class="fv-map-loading">Carregando mapa de satélite…</div><div class="fv-map-hud">GLM · NOAA</div><div class="fv-map-alarm"><button type="button" data-alarm="toggle">🔔 Ativar alarme</button><button type="button" data-alarm="test" title="Toca o alarme por alguns segundos">🔊 Testar som</button><div class="fv-map-alarm-status"></div></div><div class="fv-map-timeline"><div class="fv-map-controls"><button type="button" data-act="play">▶ Reproduzir</button><button type="button" data-act="prev" title="Quadro anterior">◀</button><button type="button" data-act="next" title="Próximo quadro">▶</button><button type="button" data-act="live">● Ao vivo</button><label>Velocidade <select data-role="speed"><option value="1000">1 s</option><option value="2000" selected>2 s</option><option value="4000">4 s</option></select></label><span class="fv-map-frame-label"></span></div><div class="fv-map-progress"><span>−60 min</span><input type="range" min="0" max="12" value="12" step="1" data-role="frame" aria-label="Quadro da última hora"/><span>mais recente</span></div></div><div class="fv-map-legend"><b>Intervalo dos Flashes</b><span><i style="background:#ff2d20"></i> 0–5 min</span><span><i style="background:#f4b942"></i> 5–10 min</span><span><i style="background:#24c96b"></i> 10–20 min</span><span><i style="background:#1787ff"></i> 20–30 min</span></div></div>',
+        html='<div class="fv-map-shell"><div class="fv-map-canvas"></div><div class="fv-map-loading">Carregando mapa de satélite…</div><div class="fv-map-hud">GLM · NOAA</div><div class="fv-map-hint" data-hidden="true"></div><div class="fv-map-alarm"><button type="button" data-alarm="toggle">🔔 Ativar alarme</button><button type="button" data-alarm="test" title="Toca o alarme por alguns segundos">🔊 Testar som</button><div class="fv-map-alarm-status"></div></div><div class="fv-map-timeline"><div class="fv-map-controls"><button type="button" data-act="play">▶ Reproduzir</button><button type="button" data-act="prev" title="Quadro anterior">◀</button><button type="button" data-act="next" title="Próximo quadro">▶</button><button type="button" data-act="live">● Ao vivo</button><label>Velocidade <select data-role="speed"><option value="1000">1 s</option><option value="2000" selected>2 s</option><option value="4000">4 s</option></select></label><span class="fv-map-frame-label"></span></div><div class="fv-map-progress"><span>−60 min</span><input type="range" min="0" max="12" value="12" step="1" data-role="frame" aria-label="Quadro da última hora"/><span>mais recente</span></div></div><div class="fv-map-legend"><b>Intervalo dos Flashes</b><span><i style="background:#ff2d20"></i> 0–5 min</span><span><i style="background:#f4b942"></i> 5–10 min</span><span><i style="background:#24c96b"></i> 10–20 min</span><span><i style="background:#1787ff"></i> 20–30 min</span></div></div>',
         css=(_ASSETS / "maplibre_realtime.css").read_text(encoding="utf-8"),
         # O alarme sonoro vai no mesmo módulo JS: o mapa chama bindAlarmPanel e alarmUpdate.
         js=(_ASSETS / "alarme_navegador.js").read_text(encoding="utf-8") + "\n"
@@ -81,10 +81,15 @@ def show_realtime_map(
     *,
     selected_geojson: dict | None = None,
     uploaded_geojson: dict | None = None,
-    selecting: bool = False,
+    select_mode: str | None = None,
+    point: tuple[float, float] | None = None,
     alarm: dict | None = None,
 ):
-    """Renderiza o mapa e recebe, se houver, retângulo selecionado pelo usuário.
+    """Renderiza o mapa e devolve o que o usuário marcou nele.
+
+    ``select_mode``: "rectangle" (arrastar ou dois cliques desenha um retângulo; resultado em ``.rectangle``),
+    "point" (um clique marca um ponto; resultado em ``.point`` = {lat, lon}) ou None (mapa normal).
+    ``point`` = (lat, lon) do modo Pontual, desenhado como um marcador.
 
     ``alarm`` (de ``src.alarme.browser_alarm_payload``) leva a área e os flashes dentro dela para o botão
     "Ativar alarme"; None quando não há área selecionada.
@@ -101,8 +106,10 @@ def show_realtime_map(
             "observation_end_ms": end_ms,
             "selection": selected_geojson,
             "overlay": uploaded_geojson,
-            "selecting": bool(selecting),
+            "select_mode": select_mode if select_mode in ("rectangle", "point") else None,
+            "point": [float(point[1]), float(point[0])] if point else None,
             "alarm": alarm,
         },
         on_rectangle_change=lambda: None,
+        on_point_change=lambda: None,
     )

@@ -140,6 +140,23 @@ function setGeoJSON(map,id,geojson){
   if(source)source.setData(geojson||emptyCollection());
 }
 
+// Retângulo entre dois cantos {lng,lat} e o GeoJSON do rascunho desenhado enquanto o usuário arrasta.
+export function rectBounds(a,b){
+  return {west:Math.min(a.lng,b.lng),east:Math.max(a.lng,b.lng),south:Math.min(a.lat,b.lat),north:Math.max(a.lat,b.lat)};
+}
+export function rectFeature(a,b){
+  const r=rectBounds(a,b);
+  return {type:'FeatureCollection',features:[{type:'Feature',properties:{},geometry:{type:'Polygon',
+    coordinates:[[[r.west,r.south],[r.east,r.south],[r.east,r.north],[r.west,r.north],[r.west,r.south]]]}}]};
+}
+const pointCollection=p=>Array.isArray(p)&&p.length===2?{type:'FeatureCollection',features:[
+  {type:'Feature',properties:{},geometry:{type:'Point',coordinates:[Number(p[0]),Number(p[1])]}}]}:emptyCollection();
+const HINTS={
+  rectangle:'▭ Arraste no mapa para desenhar o retângulo (ou clique em dois cantos opostos)',
+  rectangleSecond:'▭ Agora clique no canto oposto (ou arraste) para fechar o retângulo',
+  point:'📍 Clique no mapa para marcar o ponto'
+};
+
 function initInstance(component){
   const root=component.parentElement.querySelector('.fv-map-shell');
   const canvas=root.querySelector('.fv-map-canvas');
@@ -150,9 +167,11 @@ function initInstance(component){
   const controls=root.querySelector('.fv-map-controls');
   const hud=root.querySelector('.fv-map-hud');
   const alarmPanel=root.querySelector('.fv-map-alarm');
+  const hint=root.querySelector('.fv-map-hint');
   range.max='12';range.value='12';
   const i={root,canvas,loading,label,range,speed,controls,hud,map:null,ready:false,disposed:false,
     points:[],anchor:0,selection:null,overlay:null,selecting:false,corner:null,
+    mode:null,point:null,drag:null,lastMouseUp:0,trigger:null,lastData:null,
     frame:12,live:true,playing:false,timer:null,resizeObserver:null,raf:null,
     clusterMarkers:new Map(),lastCount:0};
   // Botão "Ativar alarme" (src/alarme_navegador.js, carregado junto com este arquivo).
@@ -238,19 +257,53 @@ function initInstance(component){
   range.addEventListener('input',onRangeInput);
   speed.addEventListener('change',onSpeedChange);
 
+  // Seleção no mapa: "rectangle" (arrastar ou dois cliques) ou "point" (um clique). Arrastar para desenhar
+  // desliga o arraste do mapa só enquanto o modo retângulo está ativo.
+  function showHint(){
+    if(!hint)return;
+    const text=i.mode==='rectangle'?(i.corner?HINTS.rectangleSecond:HINTS.rectangle):i.mode==='point'?HINTS.point:'';
+    hint.textContent=text;hint.dataset.hidden=text?'false':'true';
+  }
+  function applyInteraction(){
+    const map=i.map;if(!map)return;
+    if(i.mode==='rectangle'){map.dragPan.disable();map.boxZoom.disable();}else{map.dragPan.enable();map.boxZoom.enable();}
+    if(i.mode)map.doubleClickZoom.disable();else map.doubleClickZoom.enable();
+  }
+  function finishRect(a,b){
+    i.corner=null;i.drag=null;showHint();
+    const r=rectBounds(a,b);
+    if(r.east-r.west<.0001||r.north-r.south<.0001){setGeoJSON(i.map,'fv-draft',emptyCollection());return;}
+    setGeoJSON(i.map,'fv-draft',rectFeature(a,b)); // fica visível até o site aplicar a área
+    if(i.trigger)i.trigger('rectangle',r);
+  }
   i.update=(data,setter)=>{
-    i.rectangleCallback=setter;
+    i.lastData=data;i.trigger=setter;
     i.points=Array.isArray(data?.points)?data.points:[];
     i.anchor=Number(data?.observation_end_ms)||Date.now();
-    i.selection=data?.selection||null;i.overlay=data?.overlay||null;i.selecting=!!data?.selecting;
+    i.selection=data?.selection||null;i.overlay=data?.overlay||null;
+    i.mode=data?.select_mode||(data?.selecting?'rectangle':null);
+    i.selecting=!!i.mode;
+    i.point=Array.isArray(data?.point)?data.point:null;
     root.classList.toggle('fv-map-drawing',i.selecting);
-    if(!i.selecting)i.corner=null;
+    if(i.mode!=='rectangle'){i.corner=null;i.drag=null;}
+    showHint();applyInteraction();
     draw();
-    if(i.ready){setGeoJSON(i.map,'fv-selected',i.selection);setGeoJSON(i.map,'fv-imported',i.overlay);}
+    if(i.ready){
+      setGeoJSON(i.map,'fv-selected',i.selection);setGeoJSON(i.map,'fv-imported',i.overlay);
+      setGeoJSON(i.map,'fv-point',pointCollection(i.point));
+      if(i.mode!=='rectangle'||!i.corner)setGeoJSON(i.map,'fv-draft',emptyCollection());
+    }
   };
+  // Soltar o botão fora do mapa: cancela o arraste em andamento.
+  const onWindowMouseUp=()=>{
+    if(!i.drag)return;
+    i.drag=null;if(!i.corner)setGeoJSON(i.map,'fv-draft',emptyCollection());
+  };
+  window.addEventListener('mouseup',onWindowMouseUp);
   i.dispose=()=>{
     i.disposed=true;stopTimer();
     if(i.unbindAlarm)i.unbindAlarm();
+    window.removeEventListener('mouseup',onWindowMouseUp);
     if(i.raf!==null)cancelAnimationFrame(i.raf);
     clearClusterMarkers();
     controls.removeEventListener('click',onControlClick);
@@ -278,14 +331,34 @@ function initInstance(component){
       // Não enviar centro/zoom ao Python. Assim o zoom não some ao atualizar GLM.
     });
     map.on('move',scheduleClusters);
+    // Retângulo com o mouse: arrastar desenha; um clique sem arrastar marca um canto (dois cliques fecham).
+    map.on('mousedown',e=>{
+      if(i.mode!=='rectangle'||e.originalEvent.button!==0)return;
+      e.preventDefault();
+      i.drag={start:e.lngLat,x:e.point.x,y:e.point.y,moved:false};
+    });
+    map.on('mousemove',e=>{
+      if(i.mode!=='rectangle')return;
+      if(i.drag){
+        if(Math.hypot(e.point.x-i.drag.x,e.point.y-i.drag.y)>4)i.drag.moved=true;
+        if(i.drag.moved)setGeoJSON(map,'fv-draft',rectFeature(i.drag.start,e.lngLat));
+      }else if(i.corner){setGeoJSON(map,'fv-draft',rectFeature(i.corner,e.lngLat));}
+    });
+    map.on('mouseup',e=>{
+      if(i.mode!=='rectangle'||!i.drag)return;
+      const d=i.drag;i.drag=null;i.lastMouseUp=Date.now();
+      if(d.moved){finishRect(d.start,e.lngLat);return;}
+      if(!i.corner){i.corner=e.lngLat;showHint();}else finishRect(i.corner,e.lngLat);
+    });
+    // Toque (celular) e modo ponto: o evento click.
     map.on('click',e=>{
-      if(!i.selecting)return;
-      const {lng,lat}=e.lngLat;
-      if(!i.corner){i.corner={lng,lat};hud.textContent='Seleção: clique no canto oposto do retângulo';return;}
-      const west=Math.min(i.corner.lng,lng),east=Math.max(i.corner.lng,lng),south=Math.min(i.corner.lat,lat),north=Math.max(i.corner.lat,lat);
-      i.corner=null;
-      if(east-west<.0001||north-south<.0001)return;
-      if(i.rectangleCallback)i.rectangleCallback('rectangle',{west,south,east,north});
+      if(i.mode==='point'){
+        setGeoJSON(map,'fv-point',pointCollection([e.lngLat.lng,e.lngLat.lat]));
+        if(i.trigger)i.trigger('point',{lat:e.lngLat.lat,lon:e.lngLat.lng});
+        return;
+      }
+      if(i.mode!=='rectangle'||Date.now()-i.lastMouseUp<400)return; // o mouse já tratou
+      if(!i.corner){i.corner=e.lngLat;showHint();}else finishRect(i.corner,e.lngLat);
     });
     map.on('load',()=>{
       if(i.disposed)return;
@@ -315,9 +388,15 @@ function initInstance(component){
       map.addSource('fv-imported',{type:'geojson',data:emptyCollection()});
       map.addLayer({id:'fv-imported-fill',type:'fill',source:'fv-imported',paint:{'fill-color':'#15dbf0','fill-opacity':.1}});
       map.addLayer({id:'fv-imported-line',type:'line',source:'fv-imported',paint:{'line-color':'#15dbf0','line-width':2}});
+      map.addSource('fv-draft',{type:'geojson',data:emptyCollection()});
+      map.addLayer({id:'fv-draft-fill',type:'fill',source:'fv-draft',paint:{'fill-color':'#ffdc4a','fill-opacity':.16}});
+      map.addLayer({id:'fv-draft-line',type:'line',source:'fv-draft',paint:{'line-color':'#ffe359','line-width':2,'line-dasharray':[2,1.5]}});
+      map.addSource('fv-point',{type:'geojson',data:emptyCollection()});
+      map.addLayer({id:'fv-point-dot',type:'circle',source:'fv-point',paint:{'circle-radius':7,'circle-color':'#ffe359',
+        'circle-stroke-color':'#071522','circle-stroke-width':2.5}});
       map.on('sourcedata',e=>{if(e.sourceId==='fv-flashes'&&e.isSourceLoaded)scheduleClusters();});
       i.ready=true;loading.dataset.hidden='true';
-      i.update({points:i.points,observation_end_ms:i.anchor,selection:i.selection,overlay:i.overlay,selecting:i.selecting},i.rectangleCallback);
+      i.update(i.lastData,i.trigger);
     });
     map.on('error',()=>{
       if(!i.ready&&!i.disposed)loading.textContent='O mapa de satélite não carregou. Verifique conexão e acesso ao serviço de mapas.';

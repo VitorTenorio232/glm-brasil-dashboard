@@ -164,12 +164,14 @@ class AlarmMonitor:
         return events
 
 
-def browser_alarm_payload(in_area: pd.DataFrame | None, geometry, *, label: str, limit: int = 3000) -> dict | None:
+def browser_alarm_payload(in_area: pd.DataFrame | None, geometry, *, label: str, limit: int = 3000,
+                          reference: str = "do centro da área") -> dict | None:
     """Dados do botão "Ativar alarme" do mapa ao vivo (src/alarme_navegador.js).
 
     ``in_area``: flashes já filtrados pela área (os últimos 30 min do mapa). Vai para o navegador só o
     necessário para a regra e a mensagem: [ms UTC, distância em km, rumo em graus] a partir do centro da área,
     os ``limit`` mais recentes. ``signature`` muda quando a área muda, e o navegador recomeça a contagem.
+    ``reference`` diz na mensagem de onde se mede a distância ("do ponto" no modo Pontual).
     """
     if geometry is None or geometry.is_empty:
         return None
@@ -194,6 +196,7 @@ def browser_alarm_payload(in_area: pd.DataFrame | None, geometry, *, label: str,
         "label": label,
         "signature": hashlib.blake2s(geometry.wkb, digest_size=6).hexdigest(),
         "center": [round(ref.x, 4), round(ref.y, 4)],
+        "reference": reference,
         "flashes": rows,
         # A lista foi cortada nos mais recentes: o navegador mostra "mais de N".
         "truncated": bool(total > len(rows)),

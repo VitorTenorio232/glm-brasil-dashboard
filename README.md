@@ -41,7 +41,8 @@ preencha o `HF_TOKEN`. Sem o token, a aba de tempo real e a Tendência continuam
 
 ## Alarme de relâmpagos
 
-No site, selecione uma área no mapa ao vivo e clique em **🔔 Ativar alarme**: quando cair relâmpago na área, o
+No site, escolha uma área no mapa ao vivo (Pontual, Retângulo, Estados, Municípios ou Arquivo) e clique em
+**🔔 Ativar alarme**: quando cair relâmpago na área, o
 site toca uma sirene e cobre a tela com um aviso vermelho (a aba precisa ficar aberta).
 
 Fora do navegador, `scripts/alarme_relampagos.py` olha os dados novos do GLM a cada minuto e toca um alarme
@@ -69,6 +70,7 @@ src/
   alertas_flash.py         # cálculo da tendência 0–10 / 10–20 / 20–30 min
   alarme.py                # alarme: área de observação e quando tocar (site e computador)
   alarme_navegador.js      # botão "Ativar alarme" do mapa ao vivo (sirene, aviso, notificação)
+  area_ao_vivo.py          # área da aba ao vivo: Pontual, Retângulo, Estados, Municípios, Arquivo
   historical_glm.py        # base histórica, climatologia, anomalia, séries e mapas
   ranking_glm.py           # ranking administrativo
   cartographic_export.py   # pranchas PNG/JPEG/GIF

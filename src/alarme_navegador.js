@@ -228,9 +228,9 @@ function evaluate(a) {
     if (ev.kind !== 'alarme') continue;
     a.lastAlarmMs = Date.now();
     const plural = ev.count === 1 ? 'flash' : 'flashes';
-    const title = `Relâmpago a ${Math.round(ev.nearestKm)} km (${ev.nearestDir}) do centro da área`;
+    const title = `Relâmpago a ${Math.round(ev.nearestKm)} km (${ev.nearestDir}) ${a.area.reference || 'do centro da área'}`;
     const count = countText(a, ev.count);
-    const text = `${count.charAt(0).toUpperCase() + count.slice(1)} ${plural} na área (${a.area.label}) nos últimos 10 min. ` +
+    const text = `${count.charAt(0).toUpperCase() + count.slice(1)} ${plural} na área nos últimos 10 min (${a.area.label}). ` +
       `Último às ${brasilia(ev.lastMs)} (Brasília). Fonte: GLM/GOES (NOAA), com ~1–3 min de atraso; ` +
       'não é alerta oficial.';
     startRing(a, title, text);
@@ -240,8 +240,8 @@ function evaluate(a) {
 function statusText(a) {
   if (a.message) return a.message;
   if (!a.enabled) {
-    return a.area ? 'Toca quando cair relâmpago na área selecionada.'
-      : 'Selecione uma área no mapa (✚ Selecionar Área) ou importe um polígono para usar o alarme.';
+    return a.area ? `Toca quando cair relâmpago na área (${a.area.label}).`
+      : 'Escolha uma área acima do mapa (Pontual, Retângulo, Estados, Municípios ou Arquivo) para usar o alarme.';
   }
   if (!a.area) return 'Alarme pausado: selecione uma área.';
   if (a.ctx && a.ctx.state !== 'running') return 'O navegador bloqueou o som: clique em Desativar e ative de novo.';
@@ -288,7 +288,7 @@ function watchdog(a) {
 
 async function enable(a) {
   if (!a.area) {
-    a.message = 'Primeiro selecione uma área no mapa (✚ Selecionar Área) ou importe um polígono.';
+    a.message = 'Primeiro escolha uma área acima do mapa: Pontual, Retângulo, Estados, Municípios ou Arquivo.';
     refreshPanels(a);
     setTimeout(() => { a.message = ''; refreshPanels(a); }, 6000);
     return;

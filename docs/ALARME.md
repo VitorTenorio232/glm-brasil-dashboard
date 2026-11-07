@@ -12,8 +12,11 @@ Os dois usam a mesma regra: tocam quando há relâmpago na área nos últimos 10
 
 ## No site: botão "Ativar alarme"
 
-1. Na aba **Relâmpagos em tempo real**, escolha a área: **✚ Selecionar Área** e dois cliques no mapa (cantos
-   opostos do retângulo), ou **Importar área** (SHP, KMZ, KML, GeoJSON).
+1. Na aba **Relâmpagos em tempo real**, escolha a área na barra **Área no mapa** (os mesmos tipos da Tendência):
+   - **Pontual:** clique no mapa (ou digite as coordenadas, ou escolha um município) e ajuste o raio;
+   - **Retângulo:** arraste no mapa para desenhar (ou clique em dois cantos opostos), ou digite os limites;
+   - **Estados** ou **Municípios:** escolha um ou mais na lista;
+   - **Arquivo:** envie um shapefile (ZIP), KML, KMZ ou GeoJSON.
 2. Clique em **🔊 Testar som** no canto do mapa para ouvir a sirene e acertar o volume.
 3. Clique em **🔔 Ativar alarme**. Dois bipes curtos confirmam que o som foi liberado. Se o navegador pedir
    permissão para notificações, aceite: assim o aviso aparece mesmo com o navegador minimizado.
@@ -22,7 +25,7 @@ Quando cai relâmpago na área, o site:
 
 - toca uma sirene em loop;
 - cobre a tela com um aviso vermelho que mostra a distância e a direção do relâmpago mais perto (a partir do
-  centro da área), quantos caíram nos últimos 10 min e o horário do último;
+  ponto, no modo Pontual, ou do centro da área), quantos caíram nos últimos 10 min e o horário do último;
 - faz o título da aba piscar e, se você permitiu, mostra uma notificação do sistema;
 - no celular Android, também vibra.
 

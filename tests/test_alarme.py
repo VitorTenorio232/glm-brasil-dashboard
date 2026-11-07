@@ -122,6 +122,8 @@ def test_dados_do_alarme_do_site():
     assert len(browser_alarm_payload(df, area, label="x", limit=2)["flashes"]) == 2
     assert browser_alarm_payload(df, area, label="x", limit=2)["truncated"] is True
     assert payload["truncated"] is False
+    assert payload["reference"] == "do centro da área"
+    assert browser_alarm_payload(df, area, label="x", reference="do ponto")["reference"] == "do ponto"
     assert browser_alarm_payload(df.iloc[0:0], area, label="x")["flashes"] == []
     assert browser_alarm_payload(df, None, label="x") is None
     # A assinatura muda com a área (o navegador recomeça a contagem).
@@ -172,3 +174,31 @@ console.log(JSON.stringify(out));
     assert out["min3"] == 0
     assert out["rumos"] == ["N", "NE", "NE", "L", "S", "SO", "O", "NO", "N", "NO"]
     assert out["siren"] == [33077, 0.95]  # ~1,5 s a 22050 Hz
+
+
+def test_retangulo_desenhado_no_mapa(tmp_path):
+    """rectBounds/rectFeature de src/maplibre_realtime.js (arrastar em qualquer direção dá o mesmo retângulo)."""
+    import json
+    import shutil
+    import subprocess
+    from pathlib import Path
+
+    node = shutil.which("node")
+    if not node:
+        pytest.skip("Node.js não instalado")
+    src = Path(__file__).resolve().parents[1] / "src"
+    module = tmp_path / "mapa.mjs"
+    module.write_text((src / "alarme_navegador.js").read_text(encoding="utf-8") + "\n"
+                      + (src / "maplibre_realtime.js").read_text(encoding="utf-8"), encoding="utf-8")
+    script = tmp_path / "check.mjs"
+    script.write_text("""
+import {rectBounds, rectFeature} from './mapa.mjs';
+const a = {lng: -44.5, lat: -21}, b = {lng: -46, lat: -23};
+console.log(JSON.stringify({ab: rectBounds(a, b), ba: rectBounds(b, a),
+  ring: rectFeature(a, b).features[0].geometry.coordinates[0]}));
+""", encoding="utf-8")
+    res = subprocess.run([node, str(script)], capture_output=True, text=True, timeout=60)
+    assert res.returncode == 0, res.stderr
+    out = json.loads(res.stdout)
+    assert out["ab"] == out["ba"] == {"west": -46, "east": -44.5, "south": -23, "north": -21}
+    assert out["ring"] == [[-46, -23], [-44.5, -23], [-44.5, -21], [-46, -21], [-46, -23]]
