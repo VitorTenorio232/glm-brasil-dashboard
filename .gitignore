@@ -26,6 +26,7 @@ Thumbs.db
 # Credenciais — mantém apenas os arquivos de exemplo
 # ============================================================
 .streamlit/secrets.toml
+alarme.toml
 .env
 .env.*
 !.env.example

@@ -17,6 +17,7 @@ from streamlit_folium import st_folium
 
 from src.realtime_glm import AGE_GROUPS, fetch_live_snapshot, group_counts
 from src.maplibre_realtime import flash_payload, show_realtime_map
+from src.alarme import browser_alarm_payload
 from src.previsao_flash import render_trend_tab
 from src.historical_glm import (
     ANOMALY_CMAP,
@@ -698,8 +699,10 @@ def _live_panel():
     selected_geometry = None
     # Área desenhada tem preferência; em seguida, polígono importado.
     stored_wkb = st.session_state.get("live_area_wkb")
+    area_label = "o retângulo selecionado"
     if not stored_wkb and st.session_state.get("fv_filter_uploaded_polygon", True):
         stored_wkb = st.session_state.get("fv_user_polygon_wkb")
+        area_label = "o polígono importado"
     if stored_wkb:
         try:
             from shapely import from_wkb
@@ -787,6 +790,15 @@ def _live_panel():
         selected_geojson=selection_json,
         uploaded_geojson=st.session_state.get("fv_user_geojson"),
         selecting=selecting,
+        alarm=browser_alarm_payload(display_flashes, selected_geometry, label=area_label),
+    )
+    st.caption(
+        "🔔 **Alarme:** com uma área selecionada, clique em **Ativar alarme** no mapa. Quando cair relâmpago na "
+        "área, o site toca uma sirene em loop e abre um aviso vermelho até você clicar em **Parar alarme**; só "
+        "toca de novo depois de 30 min sem relâmpagos na área. Para funcionar a noite toda, deixe esta aba aberta "
+        "e visível, o volume alto e o computador ligado (a tela fica acesa enquanto o alarme estiver ativo). Se "
+        "trocar de aba do site ou recarregar a página, ative de novo. O aviso chega ~1–3 min depois do relâmpago "
+        "e não é alerta oficial."
     )
     rectangle = getattr(map_result, "rectangle", None)
     if rectangle:

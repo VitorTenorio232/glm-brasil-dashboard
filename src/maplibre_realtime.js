@@ -149,11 +149,14 @@ function initInstance(component){
   const speed=root.querySelector('[data-role="speed"]');
   const controls=root.querySelector('.fv-map-controls');
   const hud=root.querySelector('.fv-map-hud');
+  const alarmPanel=root.querySelector('.fv-map-alarm');
   range.max='12';range.value='12';
   const i={root,canvas,loading,label,range,speed,controls,hud,map:null,ready:false,disposed:false,
     points:[],anchor:0,selection:null,overlay:null,selecting:false,corner:null,
     frame:12,live:true,playing:false,timer:null,resizeObserver:null,raf:null,
     clusterMarkers:new Map(),lastCount:0};
+  // Botão "Ativar alarme" (src/alarme_navegador.js, carregado junto com este arquivo).
+  i.unbindAlarm=alarmPanel?bindAlarmPanel(alarmPanel):null;
 
   function stopTimer(){if(i.timer!==null){clearInterval(i.timer);i.timer=null;}}
   function notifyStatus(){
@@ -247,6 +250,7 @@ function initInstance(component){
   };
   i.dispose=()=>{
     i.disposed=true;stopTimer();
+    if(i.unbindAlarm)i.unbindAlarm();
     if(i.raf!==null)cancelAnimationFrame(i.raf);
     clearClusterMarkers();
     controls.removeEventListener('click',onControlClick);
@@ -329,5 +333,6 @@ export default function(component){
   let instance=INSTANCES.get(parent);
   if(!instance){instance=initInstance(component);INSTANCES.set(parent,instance);}
   instance.update(component.data,(name,value)=>component.setTriggerValue(name,value));
+  alarmUpdate(component.data?.alarm||null,component.data?.observation_end_ms);
   return ()=>{instance.dispose();INSTANCES.delete(parent);};
 }

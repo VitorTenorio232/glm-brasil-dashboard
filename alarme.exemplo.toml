@@ -1,0 +1,39 @@
+# Alarme de relâmpagos do Flash View — configuração
+# Copie este arquivo para alarme.toml (que não vai para o GitHub) e ajuste a sua área.
+# Guia completo: docs/ALARME.md
+
+[area]
+nome = "Itajubá (UNIFEI)"
+# Centro da área (no Google Maps: clique com o botão direito no lugar e copie os números).
+lat = -22.4136
+lon = -45.4497
+# Raio em km. O GLM localiza cada relâmpago com erro de alguns km (pixel de ~8 a 14 km),
+# então use pelo menos 10 km.
+raio_km = 20
+# Em vez do raio, você pode usar um polígono: KML, KMZ, GeoJSON ou shapefile em ZIP
+# (o mesmo tipo de arquivo da opção Arquivo do site). Com arquivo, o raio é ignorado
+# e lat/lon viram só o ponto de referência para a distância nas mensagens.
+# arquivo = "minha_area.kml"
+
+[alarme]
+min_relampagos = 1        # quantos relâmpagos na área, dentro da janela, fazem o alarme tocar
+janela_min = 10           # janela de contagem (minutos)
+rearmar_min = 30          # depois de tocar, só toca de novo após esse tempo sem relâmpagos na área
+intervalo_s = 60          # de quanto em quanto tempo procurar dados novos
+qualidade = "zero_only"   # "zero_only" (só flashes com flag de qualidade 0, como no site) ou "all"
+aviso_sem_dados_min = 10  # avisa se os dados pararem de chegar por esse tempo (o alarme fica cego)
+
+[computador]
+ativo = true
+som = true
+duracao_max_min = 10      # o som para sozinho depois disso, se ninguém clicar em "Parar alarme"
+# arquivo_som = "C:/Users/voce/Music/alarme.wav"   # um WAV seu, se quiser outro som
+
+[celular]
+# Aviso no celular pelo app gratuito ntfy (Android ou iPhone), sem cadastro. Veja docs/ALARME.md.
+ativo = false
+# O tópico funciona como senha: quem souber o nome recebe os avisos. Invente um nome longo, como
+# "flashview-alarme-" seguido de letras e números aleatórios (não use um exemplo copiado da internet).
+ntfy_topico = ""
+ntfy_servidor = "https://ntfy.sh"
+prioridade = "urgent"     # "urgent" toca mesmo com o "não perturbe", se você permitir no app

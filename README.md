@@ -39,6 +39,17 @@ python -m streamlit run app.py
 Para as abas históricas, copie `.streamlit/secrets.toml.example` para `.streamlit/secrets.toml` e
 preencha o `HF_TOKEN`. Sem o token, a aba de tempo real e a Tendência continuam funcionando.
 
+## Alarme de relâmpagos
+
+No site, selecione uma área no mapa ao vivo e clique em **🔔 Ativar alarme**: quando cair relâmpago na área, o
+site toca uma sirene e cobre a tela com um aviso vermelho (a aba precisa ficar aberta).
+
+Fora do navegador, `scripts/alarme_relampagos.py` olha os dados novos do GLM a cada minuto e toca um alarme
+(janela vermelha com som) quando cai relâmpago na sua área: um ponto com raio ou um polígono (KML, KMZ, GeoJSON,
+SHP em ZIP). Opcionalmente, manda um aviso urgente para o celular pelo app gratuito ntfy. Copie
+`alarme.exemplo.toml` para `alarme.toml`, coloque a sua área e rode
+`python scripts/alarme_relampagos.py --testar`. Guia: [docs/ALARME.md](docs/ALARME.md).
+
 ## Publicar no Streamlit Community Cloud
 
 1. Em [share.streamlit.io](https://share.streamlit.io), crie o app apontando para este repositório, branch `main`, arquivo `app.py`.
@@ -56,11 +67,13 @@ src/
   maplibre_realtime.*      # mapa ao vivo (MapLibre GL JS)
   previsao_flash.py        # aba Tendência e panorama por estado
   alertas_flash.py         # cálculo da tendência 0–10 / 10–20 / 20–30 min
+  alarme.py                # alarme: área de observação e quando tocar (site e computador)
+  alarme_navegador.js      # botão "Ativar alarme" do mapa ao vivo (sirene, aviso, notificação)
   historical_glm.py        # base histórica, climatologia, anomalia, séries e mapas
   ranking_glm.py           # ranking administrativo
   cartographic_export.py   # pranchas PNG/JPEG/GIF
   export_area.py, spatial_tools.py, map_uploads.py, view_exports.py
-scripts/                   # processamento e envio da base histórica ao Hugging Face
+scripts/                   # base histórica (processamento, envio ao HF) e alarme_relampagos.py
 tests/                     # testes automatizados (pytest)
 desktop/                   # aplicativo Windows (.exe) — ver desktop/COMO-GERAR.md
 docs/                      # arquitetura, validação e documentos antigos (docs/historico)

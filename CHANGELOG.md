@@ -1,5 +1,21 @@
 # Histórico de mudanças
 
+## 2026-11-07 (alarme)
+
+### Novidades
+- **Botão "Ativar alarme" no mapa ao vivo:** com uma área selecionada (retângulo ou polígono importado), o site
+  toca uma sirene em loop e cobre a tela com um aviso vermelho quando cai relâmpago na área (distância e
+  direção do mais perto, total em 10 min e horário), até clicar em "Parar alarme". Pisca o título da aba, mostra
+  notificação do sistema (se permitida), vibra no Android e mantém a tela acesa. Mesma regra do alarme do
+  computador; avisa se o site parar de receber dados. "Testar som" toca alguns segundos. Lógica em
+  `src/alarme_navegador.js`; o servidor manda só os flashes da área (`browser_alarm_payload`).
+- **Alarme de relâmpagos no computador** (`scripts/alarme_relampagos.py`): olha os arquivos novos do GLM a cada
+  minuto (só os que ainda não leu) e, quando há relâmpago na área de observação (ponto com raio, ou polígono de
+  KML, KMZ, GeoJSON ou SHP em ZIP), abre uma janela vermelha com som em loop até clicar em "Parar alarme". Toca
+  uma vez por tempestade e rearma depois de 30 min sem relâmpagos na área; impede a suspensão do Windows
+  enquanto roda e avisa se os dados pararem de chegar. Aviso opcional no celular pelo ntfy (prioridade urgente).
+  Configuração em `alarme.toml` (fora do Git; modelo em `alarme.exemplo.toml`). Guia: `docs/ALARME.md`.
+
 ## 2026-11-06 (municípios pequenos)
 
 ### Correções
