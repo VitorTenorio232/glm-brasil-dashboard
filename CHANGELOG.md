@@ -3,6 +3,8 @@
 ## 2026-11-07 (alarme)
 
 ### Novidades
+- **Tendência — botão "Atualizar agora":** a aba não se atualiza sozinha; o botão, ao lado do título, descarta
+  o cache e busca os arquivos GLM mais novos. Embaixo dele aparece a hora do último dado (Brasília ou UTC).
 - **Área no mapa ao vivo, como na Tendência:** a barra **Área no mapa** troca o botão "Selecionar Área" e o
   "Importar área" de baixo do mapa por cinco tipos: **Pontual** (clique no mapa, coordenadas ou município, com
   raio de 5 a 100 km), **Retângulo** (agora é só arrastar no mapa; dois cliques continuam valendo; ou digitar os

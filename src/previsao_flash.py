@@ -296,8 +296,18 @@ def _queue_point(lat: float, lon: float, *, recenter: bool = True):
 
 
 def render_trend_tab(*, snapshot_loader=None):
-    st.markdown('<div class="section-heading">📊 Tendência observada de atividade elétrica</div>',
-                unsafe_allow_html=True)
+    head_col, refresh_col = st.columns([0.8, 0.2], vertical_alignment="center")
+    with head_col:
+        st.markdown('<div class="section-heading">📊 Tendência observada de atividade elétrica</div>',
+                    unsafe_allow_html=True)
+    with refresh_col:
+        # A aba não se atualiza sozinha: o botão descarta o cache (~55 s) e busca os arquivos GLM mais novos.
+        # O clique já refaz a página; o carregamento abaixo usa os dados novos.
+        if st.button("🔄 Atualizar agora", key="fv_trend_refresh", width="stretch",
+                     disabled=snapshot_loader is None):
+            clear = getattr(snapshot_loader, "clear", None)
+            if callable(clear):
+                clear()
     st.caption("Observações GLM-L2-LCFA. Analise um ponto com raio (clique no mapa ou digite as "
                "coordenadas), um retângulo, um ou mais estados, um ou mais municípios ou a área de um "
                "arquivo (shapefile, KML, KMZ, GeoJSON). Os flashes "
@@ -345,9 +355,14 @@ def render_trend_tab(*, snapshot_loader=None):
     load_error = None
     if snapshot_loader is not None:
         try:
-            snapshot = snapshot_loader()
+            with st.spinner("Buscando os dados GLM mais recentes..."):
+                snapshot = snapshot_loader()
         except Exception as exc:
             load_error = exc
+    if snapshot is not None:
+        utc_mode = st.session_state.get("fv_trend_time_zone") == "UTC"
+        newest = snapshot.observation_end_utc.astimezone(UTC_TZ if utc_mode else BR_TZ)
+        refresh_col.caption(f"Dados até {newest:%H:%M:%S} ({'UTC' if utc_mode else 'Brasília'})")
 
     col_map, col_side = st.columns([1.7, 1], gap="large")
     state_geom = None  # geometria da área nos modos Retângulo/Estados/Municípios
