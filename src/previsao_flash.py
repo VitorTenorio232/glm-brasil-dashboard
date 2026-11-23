@@ -231,12 +231,18 @@ def build_observed_map(lat: float, lon: float, radius_km: int,
             current = current.sort_values("time_start", ascending=False)
         current = current.head(4000)
         groups = list(AGE_GROUPS) + [("30–60 min", 30, 60.01, "#a8b3c7")]
-        for label, _lo, _hi, color in groups:
+        for rank, (label, _lo, _hi, color) in enumerate(groups):
             if "age_group" not in current.columns:
                 break
             points = current.loc[current["age_group"].eq(label)]
             if points.empty:
                 continue
+            if "time_start" in points.columns:
+                points = points.sort_values("time_start")  # mais novo por último = por cima
+            # Mais recentes por cima: cada faixa no seu pane (0–5 min no z-index mais alto). Fica acima da área
+            # selecionada (overlayPane, 400) e abaixo dos marcadores e tooltips (600+).
+            pane = f"fv-flash-age-{rank}"
+            folium.map.CustomPane(pane, z_index=450 - rank, pointer_events=True).add_to(m)
             layer = folium.FeatureGroup(name=f"Flashes {label} ({len(points)})", show=True)
             for item in points.itertuples(index=False):
                 try:
@@ -247,13 +253,15 @@ def build_observed_map(lat: float, lon: float, radius_km: int,
                     tooltip = f"Flash {label} | {when:%d/%m/%Y %H:%M:%S} UTC"
                 except (TypeError, ValueError, AttributeError):
                     continue
-                folium.CircleMarker(
+                marker = folium.CircleMarker(
                     [p_lat, p_lon], radius=4.3,
                     color=color, fill_color=color,
                     fill=True, fill_opacity=0.95,
                     weight=0.8, opacity=0.95,
                     tooltip=tooltip,
-                ).add_to(layer)
+                )
+                marker.options["pane"] = pane  # o folium não repassa "pane" ao Leaflet sozinho
+                marker.add_to(layer)
             layer.add_to(m)
     add_collapsible_glm_legend(m, list(AGE_GROUPS) + [("30–60 min", 30, 60.01, "#a8b3c7")])
     if draw_rectangle:

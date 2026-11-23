@@ -448,12 +448,16 @@ def render_flash_board(flashes:pd.DataFrame,*,meta:BoardMeta,geometry=None,
             idx=np.sort(rng.choice(idx,25000,replace=False))
         lons=lons[idx];lats=lats[idx];agearr=ages.to_numpy()[idx]
         xm,ym=WGS_TO_WEB.transform(lons,lats)
+        colors=np.full(len(agearr),None,dtype=object)
         for lo,hi,color,label in GLM_BANDS:
-            m=(agearr>=lo)&(agearr<hi)
-            if m.any():
-                ax.scatter(xm[m],ym[m],marker='$⚡$',s=23,c=color,
-                           edgecolors='none',alpha=.94,zorder=4,rasterized=True)
-                plotted+=int(m.sum())
+            colors[(agearr>=lo)&(agearr<hi)]=color
+        has_band=np.flatnonzero(colors!=None)  # noqa: E711 (comparação elemento a elemento)
+        # Mais recentes por cima: desenha do mais antigo ao mais novo num único scatter.
+        draw=has_band[np.argsort(-agearr[has_band],kind='stable')]
+        if len(draw):
+            ax.scatter(xm[draw],ym[draw],marker='$⚡$',s=23,c=list(colors[draw]),
+                       edgecolors='none',alpha=.94,zorder=4,rasterized=True)
+            plotted+=int(len(draw))
     else:
         n_total=0
     _draw_outline(ax,geometry)

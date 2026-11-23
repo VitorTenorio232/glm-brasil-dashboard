@@ -1,5 +1,14 @@
 # Histórico de mudanças
 
+## 2026-11-23 (ordem dos flashes)
+
+### Correções
+- **Relâmpagos mais recentes sempre por cima dos mais antigos:**
+  - mapa ao vivo: o MapLibre ordenava os ícones pela posição na tela; agora usa `symbol-sort-key` pelo horário;
+  - mapa da Tendência: as faixas eram adicionadas da mais nova para a mais antiga, e a de 30–60 min ficava por
+    cima; agora cada faixa tem o seu pane (0–5 min no topo), e dentro da faixa o mais novo é desenhado por último;
+  - pranchas PNG/JPEG e GIF: um só scatter do mais antigo para o mais novo (antes o azul cobria o vermelho).
+
 ## 2026-11-07 (alarme)
 
 ### Novidades

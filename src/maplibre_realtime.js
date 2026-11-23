@@ -74,8 +74,9 @@ export function timelineFeatureCollection(points,anchor,live,frame){
     const age=(end-t)/60000;
     if(age<0||age>=30)continue;
     const band=age<5?0:age<10?1:age<20?2:3;
+    // order: ms em relação ao fim da janela (<= 0). Maior = mais recente = desenhado por cima (symbol-sort-key).
     features.push({type:'Feature',geometry:{type:'Point',coordinates:[lon,lat]},
-      properties:{band,color:AGE_BANDS[band].color,age:Math.round(age*10)/10,time:new Date(t).toISOString()}});
+      properties:{band,color:AGE_BANDS[band].color,age:Math.round(age*10)/10,order:t-end,time:new Date(t).toISOString()}});
   }
   return {type:'FeatureCollection',features};
 }
@@ -371,7 +372,9 @@ function initInstance(component){
       map.addLayer({id:'fv-bolts',type:'symbol',source:'fv-flashes',filter:['!', ['has','point_count']],
         layout:{'icon-image':['concat','fv-bolt-',['to-string',['get','band']]],
           'icon-size':['interpolate',['linear'],['zoom'],2,0.8,8,1.05,12,1.35],
-          'icon-allow-overlap':true,'icon-ignore-placement':true},
+          'icon-allow-overlap':true,'icon-ignore-placement':true,
+          // Mais recentes sempre por cima: sem isto o MapLibre ordena os ícones pela posição na tela.
+          'symbol-sort-key':['get','order'],'symbol-z-order':'auto'},
         paint:{'icon-opacity':0.96}});
       map.on('click','fv-bolts',e=>{
         if(i.selecting||!e.features?.length)return;
