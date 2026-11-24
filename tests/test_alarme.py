@@ -116,7 +116,7 @@ def test_dados_do_alarme_do_site():
     assert payload["center"] == [-45.45, -22.4]
     # Mais recente primeiro: [ms UTC, km, rumo].
     t5 = int((T0 + timedelta(minutes=5)).timestamp() * 1000)
-    assert payload["flashes"][0] == [t5, 1.1, 180]
+    assert payload["flashes"][0] == [t5, 1.1, 180, 0.0]  # 4ª coluna: km da borda (0 = dentro)
     assert [row[0] for row in payload["flashes"]] == sorted((row[0] for row in payload["flashes"]), reverse=True)
     assert browser_alarm_payload(df, area, label="x", limit=2)["flashes"][0][0] == t5
     assert len(browser_alarm_payload(df, area, label="x", limit=2)["flashes"]) == 2
@@ -202,3 +202,138 @@ console.log(JSON.stringify({ab: rectBounds(a, b), ba: rectBounds(b, a),
     out = json.loads(res.stdout)
     assert out["ab"] == out["ba"] == {"west": -46, "east": -44.5, "south": -23, "north": -21}
     assert out["ring"] == [[-46, -23], [-44.5, -23], [-44.5, -21], [-46, -21], [-46, -23]]
+
+
+# ---------------------------------------------------------------------------
+# Anéis em volta da área (20/50/100 km da borda), como na Sala do Céu Nowcasting
+# ---------------------------------------------------------------------------
+def _east(km: float) -> float:
+    """Longitude a ``km`` a leste do centro de ITAJUBA."""
+    import math
+
+    return ITAJUBA.lon + km / (111.195 * math.cos(math.radians(ITAJUBA.lat)))
+
+
+def test_distancia_ate_a_borda():
+    from src.alarme import edge_distance_km
+
+    area = box(-45.6, -22.6, -45.3, -22.2)
+    # 0,2° a leste da borda leste em -22,4°: 0,2 × 111,195 × cos(22,4°) ≈ 20,6 km.
+    d = edge_distance_km(area, [-22.4, -22.4, -22.4, -23.6, float("nan")], [-45.45, -45.1, -44.0, -45.45, -45.4])
+    assert d[0] == 0
+    assert d[1] == pytest.approx(20.56, abs=0.05)
+    assert all(map(lambda v: v != v, d[2:]))  # além de 100 km ou sem posição: NaN
+    assert edge_distance_km(area, [-22.4], [-45.1], max_km=10)[0] != edge_distance_km(area, [-22.4], [-45.1])[0]
+    # Área por raio: o círculo de 20 km; um ponto a 50 km do centro fica a 30 km da borda.
+    assert edge_distance_km(ITAJUBA.geometry, [ITAJUBA.lat], [_east(50)])[0] == pytest.approx(30, abs=0.1)
+
+
+def test_contornos_dos_aneis():
+    import numpy as np
+    from shapely.geometry import shape
+
+    from src.alarme import ring_geojson
+
+    rings = ring_geojson(ITAJUBA.geometry)
+    assert [f["properties"]["km"] for f in rings["features"]] == [20, 50, 100]
+    for f in rings["features"]:
+        xy = np.asarray(shape(f["geometry"]).coords)
+        d = distance_km(ITAJUBA.lat, ITAJUBA.lon, xy[:, 1], xy[:, 0])
+        # Raio da área (20 km) + o anel, com a simplificação do desenho (< 1 km).
+        assert d.min() == pytest.approx(20 + f["properties"]["km"], abs=1)
+        assert d.max() == pytest.approx(20 + f["properties"]["km"], abs=1)
+    assert ring_geojson(None) is None
+
+
+def test_dados_do_alarme_com_aneis():
+    from src.alarme import browser_alarm_payload
+
+    df = _flashes([(1, ITAJUBA.lat, _east(5)), (2, ITAJUBA.lat, _east(35)), (3, ITAJUBA.lat, _east(60)),
+                   (4, ITAJUBA.lat, _east(150))])
+    payload = browser_alarm_payload(df, ITAJUBA.geometry, label="Itajubá")
+    # Mais recente primeiro; o de 150 km do centro (130 km da borda) fica de fora.
+    assert [round(r[3]) for r in payload["flashes"]] == [40, 15, 0]
+    assert [r[2] for r in payload["flashes"]] == [90, 90, 90]
+    assert payload["ringKm"] == [20, 50, 100]
+    assert [f["properties"]["km"] for f in payload["rings"]["features"]] == [20, 50, 100]
+    assert payload["truncated"] is False and payload["nearTruncated"] is False
+    # O limite vale separado para dentro e para fora da área.
+    small = browser_alarm_payload(df, ITAJUBA.geometry, label="x", limit=1)
+    assert [round(r[3]) for r in small["flashes"]] == [40, 0]
+    assert small["truncated"] is False and small["nearTruncated"] is True
+    assert browser_alarm_payload(df, ITAJUBA.geometry, label="x", rings=())["flashes"][0][3] == 0
+
+
+def test_aneis_avisam_a_aproximacao_uma_vez():
+    from src.alarme import RingMonitor, ring_message
+
+    mon = AlarmMonitor(ITAJUBA)
+    rings = RingMonitor(ITAJUBA)
+    assert rings.rings == (20, 50, 100) and rings.max_km == 100
+
+    def step(km_from_center, minute):
+        df = _flashes([(minute - 1, ITAJUBA.lat, _east(km_from_center))]) if km_from_center is not None else None
+        end = T0 + timedelta(minutes=minute)
+        fired = [e for e in mon.update(ITAJUBA.select(df), end) if e.kind == "alarme"]
+        near = ITAJUBA.select_near(df, rings.max_km)
+        out = rings.update(near, end, inside_now=bool(fired) or mon.recent_count > 0)
+        return bool(fired), [(r, round(e.nearest_km)) for r, e in out]
+
+    # Tempestade chegando de leste (área de 20 km de raio): 80, 40 e 15 km da borda, depois dentro.
+    assert step(100, 2) == (False, [(100, 80)])
+    assert step(60, 6) == (False, [(50, 40)])
+    assert step(35, 10) == (False, [(20, 15)])
+    assert step(5, 13) == (True, [])        # dentro: quem avisa é o alarme da área
+    assert step(35, 31) == (False, [])      # saindo: os anéis não tocam de novo
+    assert step(None, 80) == (False, [])    # 30 min calmos: rearma sem avisar
+    assert step(50, 81) == (False, [(50, 30)])
+
+    # Salto direto para 10 km da borda: só o anel mais perto avisa.
+    mon, rings = AlarmMonitor(ITAJUBA), RingMonitor(ITAJUBA)
+    assert step(30, 2) == (False, [(20, 10)])
+
+    df = _flashes([(1, ITAJUBA.lat, _east(35))])
+    ev = RingMonitor(ITAJUBA).update(ITAJUBA.select_near(df, 100), T0 + timedelta(minutes=2), inside_now=False)[0][1]
+    title, text = ring_message(ITAJUBA, 20, ev, 10, tz="America/Sao_Paulo")
+    assert title == "Relâmpago a 15 km da área (L) — Itajubá"
+    assert text.startswith("1 relâmpago a até 20 km da área nos últimos 10 min.")
+    assert "Último às 00:01 (horário local)" in text
+
+
+def test_aneis_no_navegador(tmp_path):
+    """ringStep/ringCounts de src/alarme_navegador.js: mesma regra do RingMonitor."""
+    import json
+    import shutil
+    import subprocess
+    from pathlib import Path
+
+    node = shutil.which("node")
+    if not node:
+        pytest.skip("Node.js não instalado")
+    src = Path(__file__).resolve().parents[1] / "src" / "alarme_navegador.js"
+    module = tmp_path / "alarme.mjs"
+    module.write_text(src.read_text(encoding="utf-8"), encoding="utf-8")
+    script = tmp_path / "check.mjs"
+    script.write_text("""
+import {ringStep, ringCounts, insideRows} from './alarme.mjs';
+const M = 60000, on = {20: true, 50: true, 100: true}, out = {};
+let st = {}, r;
+const go = (rows, end, inside) => { r = ringStep(st, rows, end, on, inside); st = r.states;
+  return r.events.map(e => [e.ring, e.nearestKm]); };
+out.chegando = [go([[1*M, 0, 90, 80]], 2*M, false), go([[5*M, 0, 90, 40]], 6*M, false),
+  go([[9*M, 0, 90, 15]], 10*M, false), go([[12*M, 0, 90, 0]], 13*M, true),
+  go([[12*M, 0, 90, 0], [30*M, 0, 90, 15]], 31*M, false), go([], 80*M, false), go([[80*M, 0, 0, 30]], 81*M, false)];
+out.salto = ringStep({}, [[1*M, 0, 0, 10]], 2*M, on, false).events.map(e => e.ring);
+out.sem20 = ringStep({}, [[1*M, 0, 0, 10]], 2*M, {20: false, 50: true, 100: true}, false).events.map(e => e.ring);
+out.contagem = ringCounts([[1*M, 0, 0, 0], [1*M, 0, 0, 10], [1*M, 0, 0, 45], [1*M, 0, 0, 99], [-20*M, 0, 0, 10]], 2*M);
+out.dentro = insideRows([[1, 2, 3], [1, 2, 3, 0], [1, 2, 3, 5]]).length;
+console.log(JSON.stringify(out));
+""", encoding="utf-8")
+    res = subprocess.run([node, str(script)], capture_output=True, text=True, timeout=60)
+    assert res.returncode == 0, res.stderr
+    out = json.loads(res.stdout)
+    assert out["chegando"] == [[[100, 80]], [[50, 40]], [[20, 15]], [], [], [], [[50, 30]]]
+    assert out["salto"] == [20]
+    assert out["sem20"] == [50]
+    assert out["contagem"] == {"20": 1, "50": 2, "100": 3}
+    assert out["dentro"] == 2

@@ -512,6 +512,9 @@ def render_trend_tab(*, snapshot_loader=None):
                 with st.expander("Detalhes da lista de cidades"):
                     st.exception(exc)
 
+        # Resultado logo abaixo da escolha da área: no celular as colunas empilham e o mapa e os cartões
+        # ficam longe da lista; sem isto, escolher municípios parecia não fazer nada.
+        area_feedback = st.empty()
         tz_mode = st.segmented_control("Fuso do horário observado", ["Brasília", "UTC"],
                                        default="Brasília", key="fv_trend_time_zone") or "Brasília"
 
@@ -537,6 +540,17 @@ def render_trend_tab(*, snapshot_loader=None):
         has_area = point is not None
         inside = (flashes_near_point(snapshot.flashes, lat, lon, radius)
                   if snapshot is not None and has_area else pd.DataFrame())
+    summary = (analyze_glm_activity(inside, snapshot.observation_end_utc, snapshot.latency_minutes)
+               if snapshot is not None and has_area else None)
+    if summary is not None:
+        where = state_label if state_mode else f"círculo de {radius} km"
+        def br(n: int) -> str:
+            return f"{n:,}".replace(",", ".")
+
+        area_feedback.success(
+            f"**Área aplicada:** {where}  \n⚡ {br(len(inside))} flashes na última hora, "
+            f"{br(summary.latest_10min)} nos últimos 10 min · {summary.trend}. "
+            "Mapa e cartões da tendência atualizados.")
 
     with col_map:
         map_keys = {"Pontual": "fv_trend_click_map_v5", "Retângulo": "fv_trend_rect_map",
@@ -556,12 +570,12 @@ def render_trend_tab(*, snapshot_loader=None):
         if not has_area:
             st.info({
                 "Pontual": "Clique no mapa para marcar um ponto de análise, ou selecione "
-                           "um município/insira coordenadas ao lado.",
+                           "um município/insira coordenadas em Área de interesse.",
                 "Retângulo": "Desenhe um retângulo com a ferramenta ▭ no canto superior esquerdo do mapa, "
-                             "ou digite os quatro limites ao lado.",
-                "Estados": "Escolha um ou mais estados ao lado.",
-                "Municípios": "Escolha um ou mais municípios ao lado (digite o nome para buscar).",
-                "Arquivo": "Envie ao lado um shapefile (ZIP), KML, KMZ ou GeoJSON com a área.",
+                             "ou digite os quatro limites em Área de interesse.",
+                "Estados": "Escolha um ou mais estados em Área de interesse.",
+                "Municípios": "Escolha um ou mais municípios em Área de interesse (digite o nome para buscar).",
+                "Arquivo": "Envie em Área de interesse um shapefile (ZIP), KML, KMZ ou GeoJSON com a área.",
             }[area_mode])
         elif state_mode:
             st.caption(f"⚡ {len(inside)} flashes nos últimos 60 minutos em {state_label}. "
@@ -660,8 +674,6 @@ def render_trend_tab(*, snapshot_loader=None):
     elif not has_area:
         st.info("Selecione um ponto, retângulo, estado(s), município(s) ou arquivo para calcular a tendência observada.")
     else:
-        summary = analyze_glm_activity(inside, snapshot.observation_end_utc,
-                                       snapshot.latency_minutes)
         render_observational_alert(st, summary)
         obs = snapshot.observation_end_utc.astimezone(
             UTC_TZ if tz_mode == "UTC" else BR_TZ

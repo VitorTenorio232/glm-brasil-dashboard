@@ -5,6 +5,8 @@
 // página). O estado fica em window.__fvAlarm para sobreviver se o componente do mapa for remontado.
 // Mesma regra do alarme do computador (src/alarme.py): toca quando há flash na área nos últimos 10 min e só
 // toca de novo depois de 30 min sem flashes na área. Tempo da observação GLM, não do relógio do PC.
+// Anéis em volta da área, como na Sala do Céu Nowcasting (distância até a BORDA da área): até 20 km toca a
+// sirene, até 50 km mostra um aviso com bipe e até 100 km só um aviso discreto. Cada anel tem a mesma regra.
 
 export const ALARM_CONFIG = {
   minFlashes: 1,
@@ -14,7 +16,10 @@ export const ALARM_CONFIG = {
   testMs: 6000,
   noUpdateMs: 5 * 60000,   // sem rerun do site por esse tempo: alarme sem dados
   dataAgeMs: 12 * 60000,   // dado GLM mais novo com mais que isso: fonte atrasada
+  rings: [20, 50, 100],    // km da borda: sirene, aviso com bipe, aviso discreto (nesta ordem)
+  noticeMs: 15 * 60000,    // quanto tempo o aviso discreto fica no painel
 };
+const RING_STORE = 'fv-alarm-rings';
 
 const DIRECTIONS = ['N', 'NE', 'L', 'SE', 'S', 'SO', 'O', 'NO'];
 export function directionLabel(deg) {
@@ -61,6 +66,43 @@ export function alarmStep(state, flashes, endMs, cfg = ALARM_CONFIG) {
   return {state: s, events, recentCount: recent.length};
 }
 
+// Linhas do site: [ms, km do centro, rumo, km da borda (0 = dentro da área)]. Sem a 4ª coluna, conta como dentro.
+export const insideRows = rows => (rows || []).filter(f => Array.isArray(f) && !(Number(f[3]) > 0));
+
+// Um alarmStep por anel ligado, com a distância até a borda no lugar da distância do centro. Os flashes de dentro
+// da área também contam: o anel não rearma enquanto a tempestade está sobre a área, e não toca de novo quando ela
+// sai. Só aparece o anel mais perto que disparou, e nenhum quando já há flash dentro da área (``insideNow``):
+// aí quem avisa é o alarme da área.
+export function ringStep(states, rows, endMs, enabled, insideNow, cfg = ALARM_CONFIG) {
+  const next = {...states}, events = [];
+  let shown = false;
+  for (const r of cfg.rings) {
+    if (!enabled?.[r]) { next[r] = newAlarmState(); continue; }
+    const hits = (rows || []).filter(f => Array.isArray(f) && Number(f[3]) <= r)
+      .map(f => [f[0], Number(f[3]), f[2]]);
+    const res = alarmStep(next[r] || newAlarmState(), hits, endMs, cfg);
+    next[r] = res.state;
+    for (const ev of res.events) {
+      if (ev.kind !== 'alarme' || insideNow || shown) continue;
+      shown = true;
+      events.push({...ev, ring: r});
+    }
+  }
+  return {states: next, events};
+}
+
+// Flashes nos últimos 10 min em cada anel, só os de fora da área (para o painel).
+export function ringCounts(rows, endMs, cfg = ALARM_CONFIG) {
+  const out = {};
+  for (const r of cfg.rings) out[r] = 0;
+  for (const f of rows || []) {
+    const km = Number(f?.[3]), age = endMs - Number(f?.[0]);
+    if (!(km > 0) || age < -60000 || age >= cfg.windowMs) continue;
+    for (const r of cfg.rings) if (km <= r) out[r] += 1;
+  }
+  return out;
+}
+
 // Um ciclo de 1,5 s: bipes agudos alternados (1000/1500 Hz), quase quadrados, e uma pausa. Tocado em loop.
 export function sirenSamples(rate) {
   const beep = Math.round(0.18 * rate), gap = Math.round(0.07 * rate), pause = Math.round(0.5 * rate);
@@ -79,13 +121,41 @@ export function sirenSamples(rate) {
 const brasilia = ms => new Date(ms).toLocaleTimeString('pt-BR',
   {hour: '2-digit', minute: '2-digit', timeZone: 'America/Sao_Paulo'});
 
+// Anéis ligados: lembrados neste navegador (se o armazenamento estiver liberado); todos ligados na primeira vez.
+function loadRings() {
+  const on = {};
+  for (const r of ALARM_CONFIG.rings) on[r] = true;
+  try {
+    const saved = JSON.parse(window.localStorage.getItem(RING_STORE) || 'null');
+    if (saved && typeof saved === 'object') for (const r of ALARM_CONFIG.rings) if (r in saved) on[r] = !!saved[r];
+  } catch { /* armazenamento bloqueado: fica o padrão */ }
+  return on;
+}
+
+function saveRings(on) {
+  try { window.localStorage.setItem(RING_STORE, JSON.stringify(on)); } catch { /* opcional */ }
+}
+
 function alarm() {
   if (!window.__fvAlarm) {
     window.__fvAlarm = {enabled: false, ctx: null, buffer: null, state: newAlarmState(), area: null,
       signature: null, endMs: 0, lastUpdate: 0, recentCount: 0, lastAlarmMs: null, ring: null,
-      panels: new Set(), wakeLock: null, staleWarned: false, message: '', watchdog: null};
+      panels: new Set(), wakeLock: null, staleWarned: false, message: '', watchdog: null,
+      rings: loadRings(), ringStates: {}, notice: null, listeners: new Set()};
   }
   return window.__fvAlarm;
+}
+
+// O mapa desenha os anéis ligados e acompanha o alarme (ligado ou não) por aqui.
+export function alarmRingView() {
+  const a = alarm();
+  return {enabled: ALARM_CONFIG.rings.filter(r => a.rings[r]), on: a.enabled};
+}
+
+export function onAlarmChange(fn) {
+  const a = alarm();
+  a.listeners.add(fn);
+  return () => a.listeners.delete(fn);
 }
 
 function ensureGlobalStyle() {
@@ -99,6 +169,8 @@ function ensureGlobalStyle() {
 .fv-alarm-box{width:min(760px,calc(100vw - 32px));box-sizing:border-box;padding:26px 30px;border-radius:14px;color:#fff;
   animation:fvAlarmBlink 1.2s infinite;box-shadow:0 18px 60px rgba(0,0,0,.6);}
 .fv-alarm-box.fv-quiet{animation:none;background:#7f0000;}
+.fv-alarm-box.fv-amber{animation:none;background:#8a4b00;}
+.fv-alarm-box.fv-amber button{color:#8a4b00;}
 .fv-alarm-head{font-size:clamp(24px,5vw,38px);font-weight:800;letter-spacing:.5px;}
 .fv-alarm-title{font-size:clamp(17px,3vw,22px);font-weight:700;margin:12px 0 6px;}
 .fv-alarm-text{font-size:15px;line-height:1.45;}
@@ -130,6 +202,21 @@ function chirp(a) {
   });
 }
 
+function chime(a) {
+  // Dois toques suaves (aviso de 50 km): chama a atenção sem a sirene.
+  try {
+    const t0 = a.ctx.currentTime + 0.02;
+    [[0, 880], [0.22, 1175]].forEach(([dt, f]) => {
+      const o = a.ctx.createOscillator(), g = a.ctx.createGain();
+      o.type = 'triangle'; o.frequency.value = f;
+      g.gain.setValueAtTime(0.0001, t0 + dt);
+      g.gain.exponentialRampToValueAtTime(0.4, t0 + dt + 0.02);
+      g.gain.exponentialRampToValueAtTime(0.0001, t0 + dt + 0.2);
+      o.connect(g).connect(a.ctx.destination); o.start(t0 + dt); o.stop(t0 + dt + 0.22);
+    });
+  } catch { /* som opcional */ }
+}
+
 async function requestWakeLock(a) {
   try {
     if (navigator.wakeLock && !a.wakeLock && document.visibilityState === 'visible') {
@@ -151,7 +238,7 @@ function stopRing(a) {
   const r = a.ring;
   if (!r) return;
   a.ring = null;
-  try { r.source.stop(); } catch { /* já parou */ }
+  try { r.source?.stop(); } catch { /* já parou */ }
   clearInterval(r.titleTimer); clearInterval(r.vibrateTimer); clearTimeout(r.maxTimer);
   document.title = r.oldTitle;
   r.overlay.remove();
@@ -161,7 +248,7 @@ function stopRing(a) {
 function silence(a, footText) {
   const r = a.ring;
   if (!r) return;
-  try { r.source.stop(); } catch { /* já parou */ }
+  try { r.source?.stop(); } catch { /* já parou */ }
   clearInterval(r.titleTimer); clearInterval(r.vibrateTimer);
   document.title = r.oldTitle;
   if (navigator.vibrate) navigator.vibrate(0);
@@ -170,27 +257,35 @@ function silence(a, footText) {
   r.button.textContent = 'Fechar';
 }
 
-function startRing(a, title, text, {test = false} = {}) {
+// Sirene em loop com a janela vermelha piscando; com ``notice``, só dois toques e uma janela âmbar (aviso de 50 km).
+function startRing(a, title, text, {test = false, head: headText = null, notice = false} = {}) {
   stopRing(a);
   ensureGlobalStyle();
-  const source = a.ctx.createBufferSource();
-  const gain = a.ctx.createGain();
-  source.buffer = a.buffer; source.loop = true; gain.gain.value = 1;
-  source.connect(gain).connect(a.ctx.destination);
-  source.start();
+  let source = null;
+  if (notice) {
+    chime(a);
+  } else {
+    source = a.ctx.createBufferSource();
+    const gain = a.ctx.createGain();
+    source.buffer = a.buffer; source.loop = true; gain.gain.value = 1;
+    source.connect(gain).connect(a.ctx.destination);
+    source.start();
+  }
 
   const overlay = document.createElement('div');
   overlay.className = 'fv-alarm-overlay';
   overlay.setAttribute('role', 'alertdialog');
-  const box = document.createElement('div'); box.className = 'fv-alarm-box';
+  const box = document.createElement('div'); box.className = notice ? 'fv-alarm-box fv-amber' : 'fv-alarm-box';
   const head = document.createElement('div'); head.className = 'fv-alarm-head';
-  head.textContent = test ? '🔊 TESTE DO ALARME' : '⚡ RELÂMPAGO NA SUA ÁREA';
+  head.textContent = headText || (test ? '🔊 TESTE DO ALARME' : '⚡ RELÂMPAGO NA SUA ÁREA');
   const t = document.createElement('div'); t.className = 'fv-alarm-title'; t.textContent = title;
   const p = document.createElement('div'); p.className = 'fv-alarm-text'; p.textContent = text;
-  const button = document.createElement('button'); button.type = 'button'; button.textContent = 'Parar alarme';
+  const button = document.createElement('button'); button.type = 'button';
+  button.textContent = notice ? 'Fechar' : 'Parar alarme';
   const foot = document.createElement('div'); foot.className = 'fv-alarm-foot';
   const limit = test ? ALARM_CONFIG.testMs : ALARM_CONFIG.maxRingMs;
-  foot.textContent = test ? 'O teste para sozinho em alguns segundos.'
+  foot.textContent = notice ? 'Aviso de aproximação, sem sirene. A sirene toca se cair relâmpago a menos de 20 km ou dentro da área.'
+    : test ? 'O teste para sozinho em alguns segundos.'
     : `O som para sozinho às ${brasilia(Date.now() + limit)} (Brasília).`;
   box.append(head, t, p, button, foot); overlay.appendChild(box);
   document.body.appendChild(overlay);
@@ -199,48 +294,91 @@ function startRing(a, title, text, {test = false} = {}) {
 
   const oldTitle = document.title;
   let flip = false;
-  const titleTimer = setInterval(() => {
-    flip = !flip; document.title = flip ? '⚡ ALARME — relâmpago na área' : oldTitle;
-  }, 1000);
-  const vibrateTimer = navigator.vibrate ? setInterval(() => navigator.vibrate([600, 250, 600]), 2000) : null;
-  const maxTimer = setTimeout(() => {
+  const blinkTitle = notice ? '⚠️ Relâmpago perto da área' : '⚡ ALARME — relâmpago na área';
+  const titleTimer = setInterval(() => { flip = !flip; document.title = flip ? blinkTitle : oldTitle; }, 1000);
+  let vibrateTimer = null;
+  if (navigator.vibrate) {
+    if (notice) navigator.vibrate([300, 150, 300]);
+    else vibrateTimer = setInterval(() => navigator.vibrate([600, 250, 600]), 2000);
+  }
+  const maxTimer = notice ? null : setTimeout(() => {
     if (test) stopRing(a);
     else silence(a, `Som desligado às ${brasilia(Date.now())} (tempo máximo). Clique para fechar.`);
   }, limit);
   a.ring = {source, overlay, box, foot, button, oldTitle, titleTimer, vibrateTimer, maxTimer};
-  if (!test) notify(title, text, true);
+  if (!test) notify(title, text, !notice);
 }
 
 function areaFlashes(a) { return Array.isArray(a.area?.flashes) ? a.area.flashes : []; }
 
-// O site manda no máximo os 3.000 flashes mais recentes; se todos estão na janela, o total real é maior.
-function countText(a, n) {
-  const capped = !!a.area?.truncated && n >= areaFlashes(a).length;
+// O site manda no máximo os 3.000 flashes mais recentes de dentro (e de fora); se todos estão na janela, o total
+// real é maior.
+function countText(a, n, near = false) {
+  const rows = areaFlashes(a);
+  const sent = near ? rows.length - insideRows(rows).length : insideRows(rows).length;
+  const capped = !!(near ? a.area?.nearTruncated : a.area?.truncated) && n >= sent;
   return (capped ? 'mais de ' : '') + n.toLocaleString('pt-BR');
+}
+
+const capital = s => s.charAt(0).toUpperCase() + s.slice(1);
+const kmText = km => (km < 1 ? 'menos de 1' : Math.round(km).toLocaleString('pt-BR'));
+const SOURCE_NOTE = 'Fonte: GLM/GOES (NOAA), com ~1–3 min de atraso; não é alerta oficial.';
+
+function enabledRings(a) { return ALARM_CONFIG.rings.filter(r => a.rings[r]); }
+
+// Anel 1 (20 km): sirene, como dentro da área. Anel 2 (50 km): janela âmbar com bipe. Os outros: aviso discreto.
+function fireRing(a, ev) {
+  const level = ALARM_CONFIG.rings.indexOf(ev.ring);
+  const plural = ev.count === 1 ? 'flash' : 'flashes';
+  const title = `Relâmpago a ${kmText(ev.nearestKm)} km da área (${ev.nearestDir})`;
+  const text = `${capital(countText(a, ev.count, true))} ${plural} a até ${ev.ring} km da área (${a.area.label}) nos ` +
+    `últimos 10 min. Último às ${brasilia(ev.lastMs)} (Brasília). Distância medida até a borda da área. ${SOURCE_NOTE}`;
+  if (level === 0) {
+    a.lastAlarmMs = Date.now();
+    startRing(a, title, text, {head: `⚡ RELÂMPAGO A MENOS DE ${ev.ring} KM`});
+  } else if (level === 1) {
+    startRing(a, title, text, {head: `⚠️ RELÂMPAGO A MENOS DE ${ev.ring} KM`, notice: true});
+  } else {
+    a.notice = {text: `ℹ️ ${title} às ${brasilia(ev.lastMs)}.`, until: Date.now() + ALARM_CONFIG.noticeMs};
+    notify(title, text, false);
+  }
 }
 
 function evaluate(a) {
   if (!a.enabled || !a.area || !a.ctx) return;
-  const result = alarmStep(a.state, areaFlashes(a), a.endMs);
+  const rows = areaFlashes(a);
+  const result = alarmStep(a.state, insideRows(rows), a.endMs);
   a.state = result.state;
   a.recentCount = result.recentCount;
+  let fired = false;
   for (const ev of result.events) {
     if (ev.kind !== 'alarme') continue;
+    fired = true;
     a.lastAlarmMs = Date.now();
     const plural = ev.count === 1 ? 'flash' : 'flashes';
     const title = `Relâmpago a ${Math.round(ev.nearestKm)} km (${ev.nearestDir}) ${a.area.reference || 'do centro da área'}`;
-    const count = countText(a, ev.count);
-    const text = `${count.charAt(0).toUpperCase() + count.slice(1)} ${plural} na área nos últimos 10 min (${a.area.label}). ` +
-      `Último às ${brasilia(ev.lastMs)} (Brasília). Fonte: GLM/GOES (NOAA), com ~1–3 min de atraso; ` +
-      'não é alerta oficial.';
+    const text = `${capital(countText(a, ev.count))} ${plural} na área nos últimos 10 min (${a.area.label}). ` +
+      `Último às ${brasilia(ev.lastMs)} (Brasília). ${SOURCE_NOTE}`;
     startRing(a, title, text);
   }
+  const rings = ringStep(a.ringStates, rows, a.endMs, a.rings, fired || result.recentCount > 0);
+  a.ringStates = rings.states;
+  for (const ev of rings.events) fireRing(a, ev);
+}
+
+function ringsLine(a) {
+  const on = enabledRings(a);
+  if (!on.length) return '';
+  const counts = ringCounts(areaFlashes(a), a.endMs);
+  return ' Em volta (10 min): ' + on.map(r => `até ${r} km ${counts[r].toLocaleString('pt-BR')}`).join(' · ') + '.';
 }
 
 function statusText(a) {
   if (a.message) return a.message;
   if (!a.enabled) {
-    return a.area ? `Toca quando cair relâmpago na área (${a.area.label}).`
+    const on = enabledRings(a);
+    const around = on.length ? ` e avisa a até ${on[on.length - 1]} km dela` : '';
+    return a.area ? `Toca quando cair relâmpago na área (${a.area.label})${around}.`
       : 'Escolha uma área acima do mapa (Pontual, Retângulo, Estados, Municípios ou Arquivo) para usar o alarme.';
   }
   if (!a.area) return 'Alarme pausado: selecione uma área.';
@@ -252,11 +390,14 @@ function statusText(a) {
   if (a.endMs && now - a.endMs > ALARM_CONFIG.dataAgeMs) {
     return `⚠️ Dados GLM atrasados ${Math.round((now - a.endMs) / 60000)} min: o alarme fica cego até voltarem.`;
   }
+  const notice = a.notice && now < a.notice.until ? a.notice.text + ' ' : '';
   if (!a.state.armed) {
-    return `Tocou às ${brasilia(a.lastAlarmMs || now)}. Toca de novo depois de 30 min sem flashes na área.`;
+    return `${notice}Tocou às ${brasilia(a.lastAlarmMs || now)}. Toca de novo depois de 30 min sem flashes na área.` +
+      ringsLine(a);
   }
   const n = a.recentCount;
-  return `Vigiando ${a.area.label}: ${countText(a, n)} ${n === 1 ? 'flash' : 'flashes'} nos últimos 10 min.`;
+  return `${notice}Vigiando ${a.area.label}: ${countText(a, n)} ${n === 1 ? 'flash' : 'flashes'} na área nos ` +
+    `últimos 10 min.${ringsLine(a)}`;
 }
 
 function refreshPanels(a) {
@@ -267,7 +408,9 @@ function refreshPanels(a) {
     panel.classList.toggle('fv-alarm-warn', a.enabled && statusText(a).startsWith('⚠️'));
     if (toggle) toggle.textContent = a.enabled ? '🔕 Desativar alarme' : '🔔 Ativar alarme';
     if (status) status.textContent = statusText(a);
+    for (const box of panel.querySelectorAll('input[data-ring]')) box.checked = !!a.rings[box.dataset.ring];
   }
+  for (const fn of a.listeners) { try { fn(); } catch { /* o mapa pode ter sido desmontado */ } }
 }
 
 function watchdog(a) {
@@ -303,7 +446,8 @@ async function enable(a) {
   chirp(a);
   try { if ('Notification' in window && Notification.permission === 'default') Notification.requestPermission(); }
   catch { /* opcional */ }
-  a.enabled = true; a.message = ''; a.state = newAlarmState(); a.lastAlarmMs = null;
+  a.enabled = true; a.message = ''; a.state = newAlarmState(); a.ringStates = {}; a.notice = null;
+  a.lastAlarmMs = null;
   requestWakeLock(a);
   watchdog(a);
   evaluate(a);
@@ -325,12 +469,12 @@ async function testSound(a) {
     {test: true});
 }
 
-// Chamado pelo mapa a cada rerun do site (~60 s) com a área e os flashes dentro dela.
+// Chamado pelo mapa a cada rerun do site (~60 s) com a área e os flashes dentro dela e em volta.
 export function alarmUpdate(area, endMs) {
   const a = alarm();
   const signature = area?.signature || null;
   if (signature !== a.signature) {
-    a.signature = signature; a.state = newAlarmState(); a.lastAlarmMs = null;
+    a.signature = signature; a.state = newAlarmState(); a.ringStates = {}; a.notice = null; a.lastAlarmMs = null;
   }
   a.area = area || null;
   a.endMs = Number(endMs) || 0;
@@ -348,7 +492,21 @@ export function bindAlarmPanel(panel) {
     if (b.dataset.alarm === 'toggle') { if (a.enabled) disable(a); else enable(a); }
     else if (b.dataset.alarm === 'test') testSound(a);
   };
+  // Caixas dos anéis: ligar ou desligar um anel recomeça a contagem dele.
+  const onChange = e => {
+    const box = e.target.closest('input[data-ring]');
+    if (!box) return;
+    a.rings[box.dataset.ring] = box.checked;
+    a.ringStates[box.dataset.ring] = newAlarmState();
+    saveRings(a.rings);
+    evaluate(a);
+    refreshPanels(a);
+  };
   panel.addEventListener('click', onClick);
+  panel.addEventListener('change', onChange);
   refreshPanels(a);
-  return () => { panel.removeEventListener('click', onClick); a.panels.delete(panel); };
+  return () => {
+    panel.removeEventListener('click', onClick); panel.removeEventListener('change', onChange);
+    a.panels.delete(panel);
+  };
 }

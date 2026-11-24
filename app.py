@@ -773,16 +773,19 @@ def _live_panel():
         uploaded_geojson=st.session_state.get("fv_user_geojson"),
         select_mode=live_area.map_mode,
         point=live_area.point,
-        alarm=browser_alarm_payload(display_flashes, selected_geometry, label=live_area.label or "área",
+        # Todos os flashes dos últimos 30 min: o alarme usa os de dentro da área e os de até 100 km da borda.
+        alarm=browser_alarm_payload(recent, selected_geometry, label=live_area.label or "área",
                                     reference=live_area.reference),
     )
     st.caption(
         "🔔 **Alarme:** com uma área selecionada, clique em **Ativar alarme** no mapa. Quando cair relâmpago na "
         "área, o site toca uma sirene em loop e abre um aviso vermelho até você clicar em **Parar alarme**; só "
-        "toca de novo depois de 30 min sem relâmpagos na área. Para funcionar a noite toda, deixe esta aba aberta "
-        "e visível, o volume alto e o computador ligado (a tela fica acesa enquanto o alarme estiver ativo). Se "
-        "trocar de aba do site ou recarregar a página, ative de novo. O aviso chega ~1–3 min depois do relâmpago "
-        "e não é alerta oficial."
+        "toca de novo depois de 30 min sem relâmpagos na área. Os anéis tracejados em volta da área também "
+        "avisam, pela distância até a borda: até 20 km toca a sirene, até 50 km abre um aviso com bipe e até "
+        "100 km mostra um aviso discreto no painel (desmarque no painel os anéis que não quiser). Para funcionar "
+        "a noite toda, deixe esta aba aberta e visível, o volume alto e o computador ligado (a tela fica acesa "
+        "enquanto o alarme estiver ativo). Se trocar de aba do site ou recarregar a página, ative de novo. O aviso "
+        "chega ~1–3 min depois do relâmpago e não é alerta oficial."
     )
     # Retângulo arrastado ou ponto clicado no mapa: vão para os campos da área no próximo rerun.
     rectangle = getattr(map_result, "rectangle", None)

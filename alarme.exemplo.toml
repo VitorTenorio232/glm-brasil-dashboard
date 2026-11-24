@@ -22,6 +22,9 @@ rearmar_min = 30          # depois de tocar, só toca de novo após esse tempo s
 intervalo_s = 60          # de quanto em quanto tempo procurar dados novos
 qualidade = "zero_only"   # "zero_only" (só flashes com flag de qualidade 0, como no site) ou "all"
 aviso_sem_dados_min = 10  # avisa se os dados pararem de chegar por esse tempo (o alarme fica cego)
+# Anéis em volta da área, em km da BORDA (como na Sala do Céu Nowcasting): o 1º toca a sirene, o 2º abre uma
+# janela âmbar com um bipe e os outros só avisam o celular. Use [] para vigiar só a área.
+aneis_km = [20, 50, 100]
 
 [computador]
 ativo = true

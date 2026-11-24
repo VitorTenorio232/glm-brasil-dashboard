@@ -177,6 +177,14 @@ function initInstance(component){
     clusterMarkers:new Map(),lastCount:0};
   // Botão "Ativar alarme" (src/alarme_navegador.js, carregado junto com este arquivo).
   i.unbindAlarm=alarmPanel?bindAlarmPanel(alarmPanel):null;
+  // Anéis do alarme (20/50/100 km da borda da área): só os ligados no painel; mais fortes com o alarme ativo.
+  function applyRings(){
+    if(!i.ready||i.disposed||!i.map.getLayer('fv-rings-line'))return;
+    const view=alarmRingView();
+    i.map.setFilter('fv-rings-line',['in',['get','km'],['literal',view.enabled]]);
+    i.map.setPaintProperty('fv-rings-line','line-opacity',view.on?.95:.6);
+  }
+  i.unlistenAlarm=onAlarmChange(applyRings);
 
   function stopTimer(){if(i.timer!==null){clearInterval(i.timer);i.timer=null;}}
   function notifyStatus(){
@@ -292,6 +300,7 @@ function initInstance(component){
     if(i.ready){
       setGeoJSON(i.map,'fv-selected',i.selection);setGeoJSON(i.map,'fv-imported',i.overlay);
       setGeoJSON(i.map,'fv-point',pointCollection(i.point));
+      setGeoJSON(i.map,'fv-rings',data?.alarm?.rings||null);applyRings();
       if(i.mode!=='rectangle'||!i.corner)setGeoJSON(i.map,'fv-draft',emptyCollection());
     }
   };
@@ -304,6 +313,7 @@ function initInstance(component){
   i.dispose=()=>{
     i.disposed=true;stopTimer();
     if(i.unbindAlarm)i.unbindAlarm();
+    if(i.unlistenAlarm)i.unlistenAlarm();
     window.removeEventListener('mouseup',onWindowMouseUp);
     if(i.raf!==null)cancelAnimationFrame(i.raf);
     clearClusterMarkers();
@@ -385,6 +395,11 @@ function initInstance(component){
       });
       map.on('mouseenter','fv-bolts',()=>{if(!i.selecting)map.getCanvas().style.cursor='pointer';});
       map.on('mouseleave','fv-bolts',()=>{map.getCanvas().style.cursor='';});
+      // Anéis tracejados por baixo dos raios: vermelho 20 km, laranja 50 km, amarelo 100 km (cores da Sala do Céu).
+      map.addSource('fv-rings',{type:'geojson',data:emptyCollection()});
+      map.addLayer({id:'fv-rings-line',type:'line',source:'fv-rings',layout:{'line-join':'round'},
+        paint:{'line-color':['match',['get','km'],20,'#ef4444',50,'#f97316','#facc15'],
+          'line-width':['match',['get','km'],20,2,1.6],'line-dasharray':[3,2],'line-opacity':.6}},'fv-bolts');
       map.addSource('fv-selected',{type:'geojson',data:emptyCollection()});
       map.addLayer({id:'fv-selected-fill',type:'fill',source:'fv-selected',paint:{'fill-color':'#ffdc4a','fill-opacity':.11}});
       map.addLayer({id:'fv-selected-line',type:'line',source:'fv-selected',paint:{'line-color':'#ffe359','line-width':2.5}});

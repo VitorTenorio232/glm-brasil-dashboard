@@ -1,5 +1,22 @@
 # Histórico de mudanças
 
+## 2026-11-23 (anéis do alarme)
+
+### Novidades
+- **Alarme com anéis em volta da área**, como na Sala do Céu Nowcasting: além da área, o alarme vigia 20, 50 e
+  100 km a partir da **borda** dela. No site, até 20 km toca a sirene, até 50 km abre um aviso âmbar com bipe e
+  até 100 km mostra uma linha no painel (e notificação do sistema). Os anéis aparecem tracejados no mapa ao vivo
+  e cada um pode ser desmarcado no painel do alarme, que mostra as contagens de cada anel. No script do PC
+  (`alarme.aneis_km`), 20 km abre a janela vermelha, 50 km uma janela âmbar e 100 km só avisa o celular. Cada
+  anel rearma depois de 30 min sem relâmpagos; os de dentro da área contam, para não tocar de novo quando a
+  tempestade sai. A distância até a borda usa um índice dos segmentos da borda (estado de Minas: ~0,1 s).
+
+### Melhorias
+- **Tendência:** ao escolher a área (por exemplo, dois municípios), aparece logo abaixo da escolha um quadro
+  "Área aplicada" com os flashes da última hora, dos últimos 10 min e a tendência. No celular as colunas
+  empilham e o mapa e os cartões ficavam longe da lista, e parecia que nada tinha acontecido. As dicas dizem
+  "em Área de interesse" em vez de "ao lado".
+
 ## 2026-11-23 (ordem dos flashes)
 
 ### Correções

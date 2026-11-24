@@ -37,4 +37,9 @@
 .fv-map-alarm.fv-alarm-on button[data-alarm="toggle"]{background:#7f1d1d;border-color:#ff5a4f;color:#fff;}
 .fv-map-alarm.fv-alarm-warn{border-color:#f4b942;}
 .fv-map-alarm-status{flex-basis:100%;font-size:11px;color:#c9d8e6;line-height:1.3;}
+.fv-map-alarm-rings{flex-basis:100%;display:flex;flex-wrap:wrap;align-items:center;gap:3px 10px;font-size:11px;color:#c9d8e6;}
+.fv-map-alarm-rings span{flex-basis:100%;color:#9fb4c8;}
+.fv-map-alarm-rings label{display:inline-flex;align-items:center;gap:4px;cursor:pointer;white-space:nowrap;}
+.fv-map-alarm-rings input{margin:0;accent-color:#f4b942;cursor:pointer;}
+.fv-map-alarm-rings i{display:inline-block;width:14px;border-top:2px dashed var(--ring);}
 @media(max-width:700px){.fv-map-alarm{top:auto;bottom:172px;max-width:calc(100% - 24px);}.fv-map-hint{top:auto;bottom:250px;max-width:calc(100% - 24px);font-size:12px;}}

@@ -32,7 +32,8 @@ import pandas as pd
 ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT))
 
-from src.alarme import AlarmMonitor, ObservationArea, alarm_message  # noqa: E402
+from src.alarme import (RING_KM, AlarmMonitor, ObservationArea, RingMonitor, alarm_message,  # noqa: E402
+                        ring_message)
 from src.glm_aws import iter_hours, list_hour_keys, unsigned_s3_client  # noqa: E402
 from src.glm_reader import read_glm_files  # noqa: E402
 
@@ -45,7 +46,7 @@ MAX_GAP_MIN = 60   # se ficar mais que isso sem buscar (PC suspenso), recomeça 
 DEFAULTS = {
     "area": {"nome": "Minha área", "raio_km": 20.0},
     "alarme": {"min_relampagos": 1, "janela_min": 10, "rearmar_min": 30, "intervalo_s": 60,
-               "qualidade": "zero_only", "aviso_sem_dados_min": 10},
+               "qualidade": "zero_only", "aviso_sem_dados_min": 10, "aneis_km": list(RING_KM)},
     "computador": {"ativo": True, "som": True, "arquivo_som": "", "duracao_max_min": 10},
     "celular": {"ativo": False, "ntfy_topico": "", "ntfy_servidor": "https://ntfy.sh", "prioridade": "urgent"},
 }
@@ -185,14 +186,22 @@ def sound_file(computer: dict) -> str:
     return str(path if path.exists() else make_alarm_wav(path))
 
 
-def notify_computer(cfg: dict, title: str, text: str) -> subprocess.Popen | None:
-    """Abre a janela de alarme num processo separado, para o monitor continuar rodando."""
+def notify_computer(cfg: dict, title: str, text: str, *, header: str | None = None,
+                    notice: bool = False) -> subprocess.Popen | None:
+    """Abre a janela de alarme num processo separado, para o monitor continuar rodando.
+
+    ``notice``: aviso de aproximação (anel de 50 km), janela âmbar com um bipe em vez da sirene.
+    """
     computer = cfg["computador"]
     if not computer["ativo"]:
         return None
     args = [sys.executable, str(Path(__file__).resolve()), "--tocar", "--titulo", title, "--mensagem", text,
             "--duracao", str(computer["duracao_max_min"])]
-    if computer["som"]:
+    if header:
+        args += ["--cabecalho", header]
+    if notice:
+        args += ["--aviso"] + (["--bipe"] if computer["som"] else [])
+    elif computer["som"]:
         args += ["--som", sound_file(computer)]
     return subprocess.Popen(args)
 
@@ -217,8 +226,12 @@ def notify_phone(cfg: dict, title: str, text: str, *, priority=None, tags=("zap"
         log(f"Não consegui mandar o aviso para o celular: {type(exc).__name__}: {exc}")
 
 
-def run_alarm_window(title: str, text: str, duration_min: float, sound: str | None) -> None:
-    """Janela vermelha, sempre por cima, com o som em loop até clicar em Parar (ou acabar o tempo)."""
+def run_alarm_window(title: str, text: str, duration_min: float, sound: str | None, *, header: str | None = None,
+                     notice: bool = False, beep: bool = False) -> None:
+    """Janela vermelha, sempre por cima, com o som em loop até clicar em Parar (ou acabar o tempo).
+
+    Com ``notice`` (anel de 50 km): janela âmbar, sem piscar e sem sirene; ``beep`` toca um bipe do Windows.
+    """
     import tkinter as tk
 
     winsound = None
@@ -231,8 +244,10 @@ def run_alarm_window(title: str, text: str, duration_min: float, sound: str | No
             ctypes.windll.shcore.SetProcessDpiAwareness(1)
         except Exception:
             pass
-        if sound:
+        if sound and not notice:
             winsound.PlaySound(sound, winsound.SND_FILENAME | winsound.SND_ASYNC | winsound.SND_LOOP)
+        elif beep:
+            winsound.MessageBeep(winsound.MB_ICONEXCLAMATION)
 
     def silence():
         if winsound is not None:
@@ -244,11 +259,11 @@ def run_alarm_window(title: str, text: str, duration_min: float, sound: str | No
     width, height = 760, 460
     root.geometry(f"{width}x{height}+{(root.winfo_screenwidth() - width) // 2}"
                   f"+{(root.winfo_screenheight() - height) // 3}")
-    colors = ("#c62828", "#7f0000")
+    colors = ("#8a4b00", "#8a4b00") if notice else ("#c62828", "#7f0000")
     frame = tk.Frame(root, bg=colors[0], padx=28, pady=22)
     frame.pack(fill="both", expand=True)
-    header = tk.Label(frame, text="⚡ RELÂMPAGO NA SUA ÁREA", font=("Segoe UI", 30, "bold"), fg="white",
-                      bg=colors[0])
+    header = tk.Label(frame, text=header or "⚡ RELÂMPAGO NA SUA ÁREA", font=("Segoe UI", 30, "bold"),
+                      fg="white", bg=colors[0], wraplength=width - 60, justify="left")
     header.pack(anchor="w")
     subtitle = tk.Label(frame, text=title, font=("Segoe UI", 17, "bold"), fg="white", bg=colors[0],
                         wraplength=width - 60, justify="left")
@@ -257,10 +272,13 @@ def run_alarm_window(title: str, text: str, duration_min: float, sound: str | No
                     wraplength=width - 60, justify="left")
     body.pack(anchor="w")
     end_at = datetime.now() + timedelta(minutes=duration_min)
-    footer = tk.Label(frame, text=f"O som para sozinho às {end_at:%H:%M}.", font=("Segoe UI", 10),
-                      fg="#ffd7d7", bg=colors[0])
+    foot_text = ("Aviso de aproximação, sem sirene. A sirene toca se cair relâmpago a menos de 20 km ou dentro "
+                 "da área." if notice else f"O som para sozinho às {end_at:%H:%M}.")
+    footer = tk.Label(frame, text=foot_text, font=("Segoe UI", 10), fg="#ffd7d7", bg=colors[0],
+                      wraplength=width - 60, justify="left")
     footer.pack(side="bottom", anchor="w")
-    button = tk.Button(frame, text="Parar alarme", font=("Segoe UI", 18, "bold"), bg="white", fg=colors[1],
+    button = tk.Button(frame, text="Fechar" if notice else "Parar alarme", font=("Segoe UI", 18, "bold"),
+                       bg="white", fg=colors[1],
                        activebackground="#ffd7d7", relief="flat", padx=24, pady=8)
     button.pack(side="bottom", anchor="w", pady=(16, 10))
     tinted = (frame, header, subtitle, body, footer)
@@ -288,8 +306,9 @@ def run_alarm_window(title: str, text: str, duration_min: float, sound: str | No
 
     button.configure(command=close)
     root.protocol("WM_DELETE_WINDOW", close)
-    root.after(600, blink)
-    root.after(int(duration_min * 60_000), timeout)
+    if not notice:
+        root.after(600, blink)
+        root.after(int(duration_min * 60_000), timeout)
     root.lift()
     root.focus_force()
     root.mainloop()
@@ -298,6 +317,10 @@ def run_alarm_window(title: str, text: str, duration_min: float, sound: str | No
 # ---------------------------------------------------------------------------
 # Laço principal
 # ---------------------------------------------------------------------------
+def _ring_levels(n: int) -> list[str]:
+    return (["sirene", "aviso âmbar com bipe"] + ["aviso só no celular"] * n)[:n]
+
+
 def monitor(cfg: dict, area: ObservationArea, *, once: bool = False) -> None:
     a = cfg["alarme"]
     window = float(a["janela_min"])
@@ -305,12 +328,19 @@ def monitor(cfg: dict, area: ObservationArea, *, once: bool = False) -> None:
     stale_after = timedelta(minutes=float(a["aviso_sem_dados_min"]))
     mon = AlarmMonitor(area, min_flashes=int(a["min_relampagos"]), window_minutes=window,
                        rearm_minutes=float(a["rearmar_min"]))
+    # Anéis em volta da área (distância até a borda): 1º anel sirene, 2º aviso âmbar, os outros só no celular.
+    rings = RingMonitor(area, a.get("aneis_km") or [], min_flashes=int(a["min_relampagos"]),
+                        window_minutes=window, rearm_minutes=float(a["rearmar_min"]))
     feed = GlmFeed(window, str(a["qualidade"]))
     keep_awake()
     n = int(a["min_relampagos"])
     log(f"Área: {area.description}, centro em {area.lat:.4f}, {area.lon:.4f}.")
     log(f"Toca com {n} relâmpago{'s' if n > 1 else ''} na área em {window:g} min; depois de tocar, só toca de novo "
         f"após {float(a['rearmar_min']):g} min sem relâmpagos na área.")
+    if rings.rings:
+        log("Anéis em volta da área (distância até a borda): "
+            + ", ".join(f"até {r} km ({lvl})" for r, lvl in zip(rings.rings, _ring_levels(len(rings.rings))))
+            + ". Cada anel tem a mesma regra de rearme.")
     avisos = [x for x, on in (("janela com som no PC", cfg["computador"]["ativo"]),
                               ("celular (ntfy)", cfg["celular"]["ativo"])) if on]
     log("Avisos: " + (", ".join(avisos) or "nenhum (só este registro)") + f". Registro em {LOG_FILE}.")
@@ -330,22 +360,30 @@ def monitor(cfg: dict, area: ObservationArea, *, once: bool = False) -> None:
             now = datetime.now(timezone.utc)
             if obs_end is not None:
                 in_area = area.select(flashes)
+                near = area.select_near(flashes, rings.max_km) if rings.rings else None
                 lag = (now - obs_end).total_seconds() / 60
                 files = f"{n_files} arquivo{'s' if n_files > 1 else ''}"
                 status = (f"Dados até {local(obs_end):%H:%M:%S} ({lag:.1f} min de atraso, {files}): "
                           f"{len(flashes)} flashes no satélite, {len(in_area)} na área")
                 if len(in_area):
                     status += f", o mais perto a {in_area['dist_km'].min():.0f} km"
+                if near is not None:
+                    outside = near.loc[near["edge_km"] > 0]
+                    status += f", {len(outside)} a até {rings.max_km} km da borda"
+                    if len(outside):
+                        status += f" (o mais perto a {outside['edge_km'].min():.0f} km)"
                 log(status + ".")
                 if stale_warned:
                     log("Os dados do GLM voltaram; o alarme está funcionando de novo.")
                     notify_phone(cfg, "Flash View: dados de volta", "O alarme voltou a receber dados do GLM.",
                                  priority="low", tags=("white_check_mark",))
                     stale_warned = False
+                fired = False
                 for event in mon.update(in_area, obs_end):
                     if event.kind == "rearmado":
                         log(f"Área sem relâmpagos há {float(a['rearmar_min']):g} min: alarme rearmado.")
                         continue
+                    fired = True
                     title, text = alarm_message(area, event, window)
                     log(f"ALARME: {title}. {text}")
                     if once:
@@ -354,6 +392,25 @@ def monitor(cfg: dict, area: ObservationArea, *, once: bool = False) -> None:
                     if alarm_proc is None or alarm_proc.poll() is not None:
                         alarm_proc = notify_computer(cfg, title, text)
                     notify_phone(cfg, title, text)
+                for ring_km, event in rings.update(near, obs_end, inside_now=fired or mon.recent_count > 0):
+                    level = rings.rings.index(ring_km)
+                    title, text = ring_message(area, ring_km, event, window)
+                    log(f"AVISO (até {ring_km} km da área): {title}. {text}")
+                    if once:
+                        log("(--uma-vez: só mostra, não avisa)")
+                        continue
+                    if level == 0:
+                        if alarm_proc is None or alarm_proc.poll() is not None:
+                            alarm_proc = notify_computer(cfg, title, text,
+                                                         header=f"⚡ RELÂMPAGO A MENOS DE {ring_km} KM")
+                        notify_phone(cfg, title, text)
+                    elif level == 1:
+                        if alarm_proc is None or alarm_proc.poll() is not None:
+                            alarm_proc = notify_computer(cfg, title, text, notice=True,
+                                                         header=f"⚠️ RELÂMPAGO A MENOS DE {ring_km} KM")
+                        notify_phone(cfg, title, text, priority="high", tags=("warning",))
+                    else:
+                        notify_phone(cfg, title, text, priority="default", tags=("cloud_with_lightning",))
 
             last = feed.last_obs_end or feed.started
             if not stale_warned and now - last > stale_after:
@@ -390,10 +447,14 @@ def main() -> int:
     parser.add_argument("--mensagem", default="", help=argparse.SUPPRESS)
     parser.add_argument("--duracao", type=float, default=10.0, help=argparse.SUPPRESS)
     parser.add_argument("--som", default=None, help=argparse.SUPPRESS)
+    parser.add_argument("--cabecalho", default=None, help=argparse.SUPPRESS)
+    parser.add_argument("--aviso", action="store_true", help=argparse.SUPPRESS)
+    parser.add_argument("--bipe", action="store_true", help=argparse.SUPPRESS)
     args = parser.parse_args()
 
     if args.tocar:
-        run_alarm_window(args.titulo, args.mensagem, args.duracao, args.som)
+        run_alarm_window(args.titulo, args.mensagem, args.duracao, args.som, header=args.cabecalho,
+                         notice=args.aviso, beep=args.bipe)
         return 0
 
     overrides = args.lat is not None and args.lon is not None

@@ -10,6 +10,20 @@ Há duas formas de ser avisado quando cai relâmpago na sua área de observaçã
 Os dois usam a mesma regra: tocam quando há relâmpago na área nos últimos 10 min e só tocam de novo depois de
 30 min sem relâmpagos na área.
 
+Os dois também vigiam três **anéis em volta da área**, como a Sala do Céu Nowcasting. A distância é medida até a
+**borda** da área (não até o centro):
+
+| Anel | No site | No computador |
+|---|---|---|
+| até 20 km | sirene e aviso vermelho, como dentro da área | janela vermelha com som e celular (urgente) |
+| até 50 km | aviso âmbar com dois bipes, sem sirene | janela âmbar com um bipe e celular (alta) |
+| até 100 km | uma linha no painel do alarme e notificação do sistema | só o celular (normal) |
+
+Cada anel segue a mesma regra (avisa uma vez e rearma depois de 30 min sem relâmpagos a até aquela distância).
+Os relâmpagos de dentro da área também contam para os anéis: assim, quando a tempestade sai da área, os anéis
+não tocam de novo. Em cada atualização aparece só o aviso mais grave, e nenhum aviso de anel quando já há
+relâmpago dentro da área.
+
 ## No site: botão "Ativar alarme"
 
 1. Na aba **Relâmpagos em tempo real**, escolha a área na barra **Área no mapa** (os mesmos tipos da Tendência):
@@ -20,6 +34,9 @@ Os dois usam a mesma regra: tocam quando há relâmpago na área nos últimos 10
 2. Clique em **🔊 Testar som** no canto do mapa para ouvir a sirene e acertar o volume.
 3. Clique em **🔔 Ativar alarme**. Dois bipes curtos confirmam que o som foi liberado. Se o navegador pedir
    permissão para notificações, aceite: assim o aviso aparece mesmo com o navegador minimizado.
+4. Os anéis de 20, 50 e 100 km aparecem tracejados no mapa (vermelho, laranja e amarelo). Desmarque no painel
+   do alarme os que não quiser; o site lembra a escolha neste navegador. O painel mostra quantos relâmpagos
+   caíram em cada anel nos últimos 10 min.
 
 Quando cai relâmpago na área, o site:
 
@@ -155,6 +172,7 @@ coloque o seu endereço no `nome` da área.
 | `alarme.intervalo_s` | 60 | De quanto em quanto tempo procurar dados novos (mínimo 15 s). |
 | `alarme.qualidade` | `zero_only` | Só flashes com flag de qualidade 0, como no site; `all` usa todos. |
 | `alarme.aviso_sem_dados_min` | 10 | Avisa se os dados pararem de chegar por esse tempo. |
+| `alarme.aneis_km` | `[20, 50, 100]` | Anéis em volta da área, em km da borda: o 1º toca como a área, o 2º abre a janela âmbar, os outros só avisam o celular. `[]` desliga. |
 | `computador.ativo` / `som` | true / true | Janela de alarme e som no PC. |
 | `computador.duracao_max_min` | 10 | O som para sozinho depois disso, se ninguém clicar. |
 | `computador.arquivo_som` | (bipes) | Um WAV seu no lugar dos bipes. |
