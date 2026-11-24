@@ -12,6 +12,11 @@
   tempestade sai. A distância até a borda usa um índice dos segmentos da borda (estado de Minas: ~0,1 s).
 
 ### Correções
+- **Área perdida ao trocar de aba:** o site só desenha a aba aberta, e o Streamlit apaga o valor dos campos que
+  não foram desenhados. Sair da aba ao vivo e voltar zerava a barra "Área no mapa", mas o arquivo importado
+  continuava no mapa, como se fosse uma área aplicada. `src/estado_abas.py` guarda os valores e os devolve ao
+  voltar (aba ao vivo e Tendência: tipo de área, ponto, raio, retângulo, estados, municípios e fuso). O arquivo
+  importado agora só aparece no mapa ao vivo com "Arquivo" escolhido.
 - **Relâmpagos dos anéis no mapa ao vivo:** com uma área escolhida, o mapa só recebia os flashes de dentro dela,
   e os anéis ficavam vazios. Agora vão também os de até 100 km da borda, desenhados mais apagados; desmarcar um
   anel no painel do alarme esconde os flashes dele. Os cartões e as exportações continuam contando só a área.

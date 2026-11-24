@@ -11,10 +11,16 @@ import hashlib
 
 import streamlit as st
 
+from src.estado_abas import keep_widget_values, kept_value
+
 LIVE_AREA_MODES = ["Pontual", "Retângulo", "Estados", "Municípios", "Arquivo"]
 _MODE_LABELS = {"Pontual": "📍 Pontual", "Retângulo": "▭ Retângulo", "Estados": "🗺️ Estados",
                 "Municípios": "🏙️ Municípios", "Arquivo": "📁 Arquivo"}
 _RECT_KEYS = ("fv_live_rect_s", "fv_live_rect_n", "fv_live_rect_w", "fv_live_rect_e")
+# Campos da área que precisam sobreviver à troca de aba (src/estado_abas.py).
+_KEEP = ("fv_live_area_mode", "fv_live_lat", "fv_live_lon", *_RECT_KEYS, "fv_live_states", "fv_live_munis",
+         "fv_live_uf", "fv_live_city")
+_KEEP_WITH_DEFAULT = ("fv_live_radius", "fv_live_time_zone")
 
 
 @dataclass(frozen=True)
@@ -95,7 +101,7 @@ def _point_panel() -> LiveArea:
                           placeholder="clique no mapa", key="fv_live_lat")
     lon = c2.number_input("Longitude (°)", -180.0, 180.0, value=None, step=0.0001, format="%.4f",
                           placeholder="ou digite", key="fv_live_lon")
-    radius = c3.slider("Raio (km)", 5, 100, 20, 5, key="fv_live_radius")
+    radius = c3.slider("Raio (km)", 5, 100, kept_value("fv_live_radius", 20), 5, key="fv_live_radius")
     try:
         cities = city_catalog()
         u1, u2, u3 = st.columns([0.7, 1.6, 0.9], vertical_alignment="bottom")
@@ -232,6 +238,8 @@ def _file_panel() -> LiveArea:
 
 def live_area_mode_control() -> str | None:
     """Barra "Área no mapa" (como na Tendência). None: mapa inteiro, sem filtro."""
+    # Antes de tudo: devolve a área escolhida se o usuário saiu da aba e voltou.
+    keep_widget_values(restore=_KEEP, remember=_KEEP_WITH_DEFAULT)
     _apply_pending()
     return st.segmented_control("Área no mapa", LIVE_AREA_MODES, format_func=_MODE_LABELS.get,
                                 key="fv_live_area_mode")

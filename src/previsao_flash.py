@@ -303,7 +303,17 @@ def _queue_point(lat: float, lon: float, *, recenter: bool = True):
     st.session_state["fv_trend_pending_point"] = (lat, lon, recenter)
 
 
+_TREND_KEEP = ("fv_trend_area_mode", "fv_trend_lat", "fv_trend_lon", "fv_trend_rect_s", "fv_trend_rect_n",
+               "fv_trend_rect_w", "fv_trend_rect_e", "fv_trend_states", "fv_trend_munis", "fv_trend_uf",
+               "fv_trend_city")
+_TREND_KEEP_WITH_DEFAULT = ("fv_trend_obs_radius", "fv_trend_time_zone")
+
+
 def render_trend_tab(*, snapshot_loader=None):
+    from src.estado_abas import keep_widget_values, kept_value
+
+    # A aba só é desenhada quando está aberta: devolve a área escolhida antes de criar os campos.
+    keep_widget_values(restore=_TREND_KEEP, remember=_TREND_KEEP_WITH_DEFAULT)
     head_col, refresh_col = st.columns([0.8, 0.2], vertical_alignment="center")
     with head_col:
         st.markdown('<div class="section-heading">📊 Tendência observada de atividade elétrica</div>',
@@ -368,14 +378,14 @@ def render_trend_tab(*, snapshot_loader=None):
         except Exception as exc:
             load_error = exc
     if snapshot is not None:
-        utc_mode = st.session_state.get("fv_trend_time_zone") == "UTC"
+        utc_mode = st.session_state.get("fv_trend_time_zone", kept_value("fv_trend_time_zone", "Brasília")) == "UTC"
         newest = snapshot.observation_end_utc.astimezone(UTC_TZ if utc_mode else BR_TZ)
         refresh_col.caption(f"Dados até {newest:%H:%M:%S} ({'UTC' if utc_mode else 'Brasília'})")
 
     col_map, col_side = st.columns([1.7, 1], gap="large")
     state_geom = None  # geometria da área nos modos Retângulo/Estados/Municípios
     state_label = None
-    radius = int(st.session_state.get("fv_trend_obs_radius", 40))
+    radius = int(st.session_state.get("fv_trend_obs_radius", kept_value("fv_trend_obs_radius", 40)))
     with col_side:
         st.markdown("**Área de interesse**")
         # Valor inicial via session_state (sem default=), pois a tabela também altera este controle.
@@ -472,7 +482,7 @@ def render_trend_tab(*, snapshot_loader=None):
                     st.rerun()
 
         else:
-            radius = st.slider("Raio da análise (km)", 10, 100, 40, 5,
+            radius = st.slider("Raio da análise (km)", 10, 100, kept_value("fv_trend_obs_radius", 40), 5,
                                key="fv_trend_obs_radius")
             lat = st.number_input("Latitude (°)", min_value=-90.0, max_value=90.0,
                                   value=None, step=0.0001, format="%.5f",
@@ -516,7 +526,8 @@ def render_trend_tab(*, snapshot_loader=None):
         # ficam longe da lista; sem isto, escolher municípios parecia não fazer nada.
         area_feedback = st.empty()
         tz_mode = st.segmented_control("Fuso do horário observado", ["Brasília", "UTC"],
-                                       default="Brasília", key="fv_trend_time_zone") or "Brasília"
+                                       default=kept_value("fv_trend_time_zone", "Brasília"),
+                                       key="fv_trend_time_zone") or "Brasília"
 
     # Retângulo, Estados e Municípios usam a geometria da área; Pontual usa ponto + raio.
     state_mode = area_mode != "Pontual"

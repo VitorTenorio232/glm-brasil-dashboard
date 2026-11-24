@@ -18,6 +18,7 @@ from streamlit_folium import st_folium
 from src.realtime_glm import AGE_GROUPS, fetch_live_snapshot, group_counts
 from src.maplibre_realtime import flash_payload, show_realtime_map
 from src.alarme import RING_KM, browser_alarm_payload, edge_distance_km
+from src.estado_abas import kept_value
 from src.area_ao_vivo import (clear_live_area, live_area_mode_control, queue_map_point, queue_map_rectangle,
                               render_live_area_panel)
 from src.previsao_flash import render_trend_tab
@@ -712,7 +713,7 @@ def _live_panel():
 
     tz_mode = st.segmented_control(
         "Horário em", ["Brasília", "UTC"],
-        default="Brasília", key="fv_live_time_zone"
+        default=kept_value("fv_live_time_zone", "Brasília"), key="fv_live_time_zone"
     ) or "Brasília"
     chosen_tz = LOCAL_TIMEZONE if tz_mode == "Brasília" else ZoneInfo("UTC")
     observed = snapshot.observation_end_utc.astimezone(chosen_tz)
@@ -778,7 +779,8 @@ def _live_panel():
     map_result = show_realtime_map(
         points_js, snapshot.observation_end_utc,
         selected_geojson=selection_json,
-        uploaded_geojson=st.session_state.get("fv_user_geojson"),
+        # O arquivo importado só aparece com "Arquivo" escolhido: fora disso ele parecia uma área aplicada.
+        uploaded_geojson=st.session_state.get("fv_user_geojson") if live_area.mode == "Arquivo" else None,
         select_mode=live_area.map_mode,
         point=live_area.point,
         # Todos os flashes dos últimos 30 min: o alarme usa os de dentro da área e os de até 100 km da borda.
