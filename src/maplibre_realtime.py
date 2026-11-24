@@ -18,6 +18,9 @@ MAX_VISUAL_FLASHES = 60_000
 def flash_payload(df: pd.DataFrame, *, limit: int = MAX_VISUAL_FLASHES) -> list[list[float | int]]:
     """Converte lat/lon/tempo UTC em registros compactos [lon,lat,ms].
 
+    Com a coluna ``edge_km`` (distância até a borda da área; 0 = dentro), cada registro ganha um 4º valor:
+    o mapa desenha mais apagados os flashes dos anéis e esconde os dos anéis desligados no painel do alarme.
+
     A amostra visual é distribuída por faixas de 5 minutos (não apenas pelos
     dados mais recentes), para a barra histórica não perder seus quadros.
     Os totais estatísticos usam sempre o DataFrame completo.
@@ -34,6 +37,9 @@ def flash_payload(df: pd.DataFrame, *, limit: int = MAX_VISUAL_FLASHES) -> list[
     if not valid.any():
         return []
     packed = pd.DataFrame({"lon": lon[valid], "lat": lat[valid], "date": dates[valid]})
+    has_edge = "edge_km" in df.columns
+    if has_edge:
+        packed["edge"] = pd.to_numeric(df["edge_km"], errors="coerce")[valid].fillna(0.0)
     # Amostragem temporal estratificada: um .head(limit) retém somente flashes
     # recentes e deixa vazios os quadros antigos da animação de uma hora.
     packed["bucket"] = packed["date"].dt.floor("5min")
@@ -52,6 +58,12 @@ def flash_payload(df: pd.DataFrame, *, limit: int = MAX_VISUAL_FLASHES) -> list[
         # temporal tem prioridade sobre alcançar exatamente o limite.
     packed = packed.sort_values("date", ascending=False)
     ms = packed["date"].astype("int64") // 1_000_000
+    if has_edge:
+        # Fora da área a borda fica em pelo menos 0,1 km: 0 quer dizer "dentro" no navegador.
+        return [
+            [round(float(lon), 5), round(float(lat), 5), int(ts), 0.0 if e <= 0 else max(0.1, round(float(e), 1))]
+            for lon, lat, ts, e in zip(packed["lon"], packed["lat"], ms, packed["edge"])
+        ]
     return [
         [round(float(lon), 5), round(float(lat), 5), int(ts)]
         for lon, lat, ts in zip(packed["lon"], packed["lat"], ms)

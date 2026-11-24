@@ -17,7 +17,7 @@ from streamlit_folium import st_folium
 
 from src.realtime_glm import AGE_GROUPS, fetch_live_snapshot, group_counts
 from src.maplibre_realtime import flash_payload, show_realtime_map
-from src.alarme import browser_alarm_payload
+from src.alarme import RING_KM, browser_alarm_payload, edge_distance_km
 from src.area_ao_vivo import (clear_live_area, live_area_mode_control, queue_map_point, queue_map_rectangle,
                               render_live_area_panel)
 from src.previsao_flash import render_trend_tab
@@ -763,9 +763,17 @@ def _live_panel():
     # Simplificada só para desenhar (municípios do IBGE têm muitos vértices); o filtro usa a original.
     selection_json = (mapping(selected_geometry.simplify(0.001, preserve_topology=True))
                       if selected_geometry is not None else None)
-    points_js = flash_payload(hour_flashes)
-    if len(hour_flashes) > len(points_js):
-        st.caption(f"Exibindo {len(points_js):,} dos {len(hour_flashes):,} flashes no mapa por desempenho; "
+    # Com área escolhida, o mapa mostra também os flashes dos anéis do alarme (até 100 km da borda), mais
+    # apagados; os números e as exportações continuam só com a área.
+    map_flashes = hour_flashes
+    if selected_geometry is not None and not snapshot.flashes.empty:
+        edge = edge_distance_km(selected_geometry, snapshot.flashes["lat"], snapshot.flashes["lon"],
+                                max_km=max(RING_KM))
+        near = np.isfinite(edge)
+        map_flashes = snapshot.flashes.loc[near].assign(edge_km=edge[near])
+    points_js = flash_payload(map_flashes)
+    if len(map_flashes) > len(points_js):
+        st.caption(f"Exibindo {len(points_js):,} dos {len(map_flashes):,} flashes no mapa por desempenho; "
                    "as estatísticas continuam utilizando todos os registros.".replace(",", "."))
     map_result = show_realtime_map(
         points_js, snapshot.observation_end_utc,
@@ -782,7 +790,8 @@ def _live_panel():
         "área, o site toca uma sirene em loop e abre um aviso vermelho até você clicar em **Parar alarme**; só "
         "toca de novo depois de 30 min sem relâmpagos na área. Os anéis tracejados em volta da área também "
         "avisam, pela distância até a borda: até 20 km toca a sirene, até 50 km abre um aviso com bipe e até "
-        "100 km mostra um aviso discreto no painel (desmarque no painel os anéis que não quiser). Para funcionar "
+        "100 km mostra um aviso discreto no painel (desmarque no painel os anéis que não quiser). Os relâmpagos "
+        "dos anéis aparecem no mapa mais apagados; os números acima contam só a área. Para funcionar "
         "a noite toda, deixe esta aba aberta e visível, o volume alto e o computador ligado (a tela fica acesa "
         "enquanto o alarme estiver ativo). Se trocar de aba do site ou recarregar a página, ative de novo. O aviso "
         "chega ~1–3 min depois do relâmpago e não é alerta oficial."

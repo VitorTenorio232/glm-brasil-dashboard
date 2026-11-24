@@ -11,6 +11,11 @@
   anel rearma depois de 30 min sem relâmpagos; os de dentro da área contam, para não tocar de novo quando a
   tempestade sai. A distância até a borda usa um índice dos segmentos da borda (estado de Minas: ~0,1 s).
 
+### Correções
+- **Relâmpagos dos anéis no mapa ao vivo:** com uma área escolhida, o mapa só recebia os flashes de dentro dela,
+  e os anéis ficavam vazios. Agora vão também os de até 100 km da borda, desenhados mais apagados; desmarcar um
+  anel no painel do alarme esconde os flashes dele. Os cartões e as exportações continuam contando só a área.
+
 ### Melhorias
 - **Tendência:** ao escolher a área (por exemplo, dois municípios), aparece logo abaixo da escolha um quadro
   "Área aplicada" com os flashes da última hora, dos últimos 10 min e a tendência. No celular as colunas

@@ -63,7 +63,9 @@ export function frameEndMs(anchor, live, frame){
 // Sempre uma janela de 30 min RELATIVA ao instante selecionado na barra.
 // Exemplo: em -60 min, vermelho significa flashes de -65 a -60 min,
 // amarelo de -70 a -65; verde -80 a -70; azul -90 a -80.
-export function timelineFeatureCollection(points,anchor,live,frame){
+// p[3] (opcional) = km até a borda da área escolhida (0 = dentro): flashes além de maxEdgeKm ficam de fora e
+// os de fora da área recebem out=1 (desenhados mais apagados).
+export function timelineFeatureCollection(points,anchor,live,frame,maxEdgeKm=Infinity){
   const end=frameEndMs(anchor,live,frame);
   const features=[];
   if(!Number.isFinite(end))return {type:'FeatureCollection',features};
@@ -73,10 +75,12 @@ export function timelineFeatureCollection(points,anchor,live,frame){
     if(![lon,lat,t].every(Number.isFinite)||Math.abs(lat)>85||Math.abs(lon)>180)continue;
     const age=(end-t)/60000;
     if(age<0||age>=30)continue;
+    const edge=Number(p[3]),out=edge>0?1:0;
+    if(out&&!(edge<=maxEdgeKm))continue;
     const band=age<5?0:age<10?1:age<20?2:3;
     // order: ms em relação ao fim da janela (<= 0). Maior = mais recente = desenhado por cima (symbol-sort-key).
     features.push({type:'Feature',geometry:{type:'Point',coordinates:[lon,lat]},
-      properties:{band,color:AGE_BANDS[band].color,age:Math.round(age*10)/10,order:t-end,time:new Date(t).toISOString()}});
+      properties:{band,out,color:AGE_BANDS[band].color,age:Math.round(age*10)/10,order:t-end,time:new Date(t).toISOString()}});
   }
   return {type:'FeatureCollection',features};
 }
@@ -184,7 +188,11 @@ function initInstance(component){
     i.map.setFilter('fv-rings-line',['in',['get','km'],['literal',view.enabled]]);
     i.map.setPaintProperty('fv-rings-line','line-opacity',view.on?.95:.6);
   }
-  i.unlistenAlarm=onAlarmChange(applyRings);
+  // Ligar/desligar um anel também mostra/esconde os flashes dele (redesenha só quando a escolha muda).
+  i.unlistenAlarm=onAlarmChange(()=>{
+    applyRings();
+    if(alarmRingView().enabled.join(',')!==i.ringKey)draw();
+  });
 
   function stopTimer(){if(i.timer!==null){clearInterval(i.timer);i.timer=null;}}
   function notifyStatus(){
@@ -241,7 +249,9 @@ function initInstance(component){
     }
   }
   function draw(){
-    const fc=timelineFeatureCollection(i.points,i.anchor,i.live,i.frame);
+    const rings=alarmRingView().enabled;
+    i.ringKey=rings.join(',');
+    const fc=timelineFeatureCollection(i.points,i.anchor,i.live,i.frame,rings.length?Math.max(...rings):0);
     i.lastCount=fc.features.length;
     if(i.ready){
       // Alterar apenas os dados, sem map.remove(), setStyle(), flyTo() nem jumpTo().
@@ -385,7 +395,7 @@ function initInstance(component){
           'icon-allow-overlap':true,'icon-ignore-placement':true,
           // Mais recentes sempre por cima: sem isto o MapLibre ordena os ícones pela posição na tela.
           'symbol-sort-key':['get','order'],'symbol-z-order':'auto'},
-        paint:{'icon-opacity':0.96}});
+        paint:{'icon-opacity':['case',['==',['get','out'],1],0.5,0.96]}});
       map.on('click','fv-bolts',e=>{
         if(i.selecting||!e.features?.length)return;
         const f=e.features[0],p=f.properties;

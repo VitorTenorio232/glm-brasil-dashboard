@@ -337,3 +337,38 @@ console.log(JSON.stringify(out));
     assert out["sem20"] == [50]
     assert out["contagem"] == {"20": 1, "50": 2, "100": 3}
     assert out["dentro"] == 2
+
+
+def test_mapa_mostra_os_flashes_dos_aneis(tmp_path):
+    """flash_payload leva a distância até a borda; o mapa esconde os dos anéis desligados e apaga os de fora."""
+    import json
+    import shutil
+    import subprocess
+    from pathlib import Path
+
+    from src.maplibre_realtime import flash_payload
+
+    df = _flashes([(1, ITAJUBA.lat, _east(5)), (2, ITAJUBA.lat, _east(35)), (3, ITAJUBA.lat, _east(90))])
+    assert [len(p) for p in flash_payload(df)] == [3, 3, 3]  # sem área: como antes
+    df["edge_km"] = [0.0, 15.0, 70.04]
+    assert [p[3] for p in flash_payload(df)] == [70.0, 15.0, 0.0]
+
+    node = shutil.which("node")
+    if not node:
+        pytest.skip("Node.js não instalado")
+    src = Path(__file__).resolve().parents[1] / "src"
+    module = tmp_path / "mapa.mjs"
+    module.write_text((src / "alarme_navegador.js").read_text(encoding="utf-8") + "\n"
+                      + (src / "maplibre_realtime.js").read_text(encoding="utf-8"), encoding="utf-8")
+    script = tmp_path / "check.mjs"
+    script.write_text("""
+import {timelineFeatureCollection} from './mapa.mjs';
+const end = Date.UTC(2026, 10, 23, 15, 0), M = 60000;
+const pts = [[-45, -22, end - 2*M, 0], [-45, -22, end - 3*M, 15], [-45, -22, end - 4*M, 70], [-45, -22, end - 5*M]];
+const out = k => timelineFeatureCollection(pts, end, true, 12, k).features.map(f => f.properties.out);
+console.log(JSON.stringify({todos: out(100), ate50: out(50), nenhum: out(0), padrao: out(undefined)}));
+""", encoding="utf-8")
+    res = subprocess.run([node, str(script)], capture_output=True, text=True, timeout=60)
+    assert res.returncode == 0, res.stderr
+    out = json.loads(res.stdout)
+    assert out == {"todos": [0, 1, 1, 0], "ate50": [0, 1, 0], "nenhum": [0, 0], "padrao": [0, 1, 1, 0]}
