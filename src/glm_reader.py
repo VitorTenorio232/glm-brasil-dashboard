@@ -174,14 +174,35 @@ def read_glm_file(path: str | Path, *, quality: str = "all") -> pd.DataFrame:
         raise ValueError("quality deve ser 'all' ou 'zero_only'")
     return out.reset_index(drop=True)
 
+def _concat_flashes(frames: list[pd.DataFrame]) -> pd.DataFrame:
+    if not frames:
+        return pd.DataFrame()
+    out = pd.concat(frames, ignore_index=True)
+    return out.drop_duplicates(subset=["flash_uid"]).sort_values("time_start").reset_index(drop=True)
+
+
 def read_glm_files(paths, *, quality: str = "all") -> pd.DataFrame:
     frames = []
     for p in sorted(map(Path, paths)):
         df = read_glm_file(p, quality=quality)
         if not df.empty:
             frames.append(df)
-    if not frames:
-        return pd.DataFrame()
-    out = pd.concat(frames, ignore_index=True)
-    out = out.drop_duplicates(subset=["flash_uid"]).sort_values("time_start").reset_index(drop=True)
-    return out
+    return _concat_flashes(frames)
+
+
+def read_glm_files_tolerant(paths, *, quality: str = "all") -> tuple[pd.DataFrame, list[Path]]:
+    """Como ``read_glm_files``, mas pula arquivos ilegíveis (truncados, corrompidos).
+
+    Retorna (flashes, arquivos que não puderam ser lidos). No mapa ao vivo, um arquivo ruim entre
+    ~270 derrubava a janela inteira.
+    """
+    frames, unreadable = [], []
+    for p in sorted(map(Path, paths)):
+        try:
+            df = read_glm_file(p, quality=quality)
+        except Exception:
+            unreadable.append(p)
+            continue
+        if not df.empty:
+            frames.append(df)
+    return _concat_flashes(frames), unreadable

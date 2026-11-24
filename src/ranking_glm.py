@@ -2,12 +2,11 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 from pathlib import Path, PurePosixPath
-import os
 import re
 
 import pandas as pd
 
-from .historical_glm import SourceConfig
+from .historical_glm import SourceConfig, hf_download, hf_listing
 
 
 _RANK_RE = re.compile(
@@ -31,6 +30,7 @@ class RankingRepository:
             raise ValueError("Fonte histórica não configurada.")
         self.config = config
         self._files: list[str] | None = None
+        self._revision: str | None = None  # commit do Dataset lido em _list_files
 
     def _list_files(self) -> list[str]:
         if self._files is not None:
@@ -40,16 +40,7 @@ class RankingRepository:
             root = Path(self.config.local_root).expanduser().resolve()
             self._files = [p.relative_to(root).as_posix() for p in root.rglob("*.parquet")]
         else:
-            from huggingface_hub import HfApi
-
-            token = os.getenv(self.config.hf_token_env) or None
-            api = HfApi(token=token)
-            files = api.list_repo_files(self.config.hf_repo, repo_type="dataset")
-            prefix = self.config.hf_prefix.strip("/")
-            if prefix:
-                ps = prefix + "/"
-                files = [f[len(ps):] for f in files if f.startswith(ps)]
-            self._files = list(files)
+            self._files, self._revision = hf_listing(self.config)
         return list(self._files)
 
     def scan(self) -> list[RankingFile]:
@@ -83,17 +74,9 @@ class RankingRepository:
                 raise FileNotFoundError(path)
             return path
 
-        from huggingface_hub import hf_hub_download
-
-        prefix = self.config.hf_prefix.strip("/")
-        remote = f"{prefix}/{relpath}" if prefix else relpath
-        token = os.getenv(self.config.hf_token_env) or None
-        return Path(hf_hub_download(
-            repo_id=self.config.hf_repo,
-            repo_type="dataset",
-            filename=remote,
-            token=token,
-        ))
+        if self._files is None:
+            self._list_files()  # lê a lista e fixa o commit
+        return hf_download(self.config, relpath, self._revision)
 
     def load(self, level: str, scale: str) -> pd.DataFrame:
         item = self._select(level, scale)

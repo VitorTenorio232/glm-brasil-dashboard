@@ -55,6 +55,18 @@ def geometry_from_geojson(obj: dict[str, Any] | None):
     return geom
 
 
+def map_text(text) -> str:
+    """Texto seguro para tooltip e lista de camadas do folium/Leaflet.
+
+    O folium põe o tooltip cru dentro de uma template string JavaScript e o Leaflet monta a lista de
+    camadas com innerHTML. Um rótulo vindo do usuário (nome do arquivo enviado, ex.
+    ``<img src=x onerror=...>.geojson``) virava HTML/JS no mapa. Escapa HTML, crase e cifrão.
+    """
+    import html
+
+    return html.escape(str(text)).replace("`", "&#96;").replace("$", "&#36;")
+
+
 def representative_latlon(geometry) -> tuple[float, float]:
     point = geometry.representative_point()
     return float(point.y), float(point.x)
@@ -64,19 +76,15 @@ def filter_points_by_geometry(df, geometry, *, lat_col: str = "lat", lon_col: st
     """Filtra DataFrame de pontos sem GeoDataFrame, usando Shapely vetorizado."""
     if geometry is None or df is None or len(df) == 0:
         return df
-    from shapely import contains_xy, intersects_xy
+    from shapely import intersects_xy
 
     lat = np.asarray(df[lat_col], dtype=float)
     lon = np.asarray(df[lon_col], dtype=float)
     valid = np.isfinite(lat) & np.isfinite(lon)
     inside = np.zeros(len(df), dtype=bool)
     if np.any(valid):
-        mask = contains_xy(geometry, lon[valid], lat[valid])
-        try:
-            mask |= intersects_xy(geometry.boundary, lon[valid], lat[valid])
-        except Exception:
-            pass
-        inside[np.where(valid)[0]] = mask
+        # Dentro ou sobre a borda (igual a contains_xy + intersects_xy na borda, bem mais rápido).
+        inside[np.where(valid)[0]] = intersects_xy(geometry, lon[valid], lat[valid])
     return df.loc[inside].copy()
 
 

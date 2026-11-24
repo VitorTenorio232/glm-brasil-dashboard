@@ -11,6 +11,8 @@ import hashlib
 
 import streamlit as st
 
+from src.erros import error_text
+
 from src.estado_abas import keep_widget_values, kept_value
 
 LIVE_AREA_MODES = ["Pontual", "Retângulo", "Estados", "Municípios", "Arquivo"]
@@ -217,7 +219,7 @@ def _file_panel() -> LiveArea:
                 st.session_state["fv_uploaded_name"] = uploaded.name
                 st.toast(f"Camada carregada: {nfeat} feição(ões).")
             except Exception as exc:
-                st.error(f"Não foi possível ler a geometria: {exc}")
+                st.error(f"Não foi possível ler a geometria: {error_text(exc)}")
     if not st.session_state.get("fv_user_geojson"):
         return LiveArea("Arquivo")
     name = st.session_state.get("fv_uploaded_name") or "arquivo importado"

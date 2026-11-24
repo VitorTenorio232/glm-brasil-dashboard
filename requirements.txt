@@ -27,6 +27,7 @@ pyarrow>=18
 huggingface_hub>=0.28
 
 # Flash View — V6 Sala de Operações
-Pillow>=10,<13
+# 13.0 corrige 42 vulnerabilidades da 12.x (pip-audit, nov/2026); streamlit 1.66 aceita pillow<14.
+Pillow>=13.0,<14
 boto3>=1.35,<2
 contextily>=1.6,<2

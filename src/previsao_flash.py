@@ -13,10 +13,12 @@ from folium.plugins import Fullscreen
 import numpy as np
 import pandas as pd
 import streamlit as st
+
+from src.erros import error_text, show_error_details
 from streamlit_folium import st_folium
 
 from src.alertas_flash import analyze_glm_activity, render_observational_alert, add_collapsible_glm_legend
-from src.realtime_glm import AGE_GROUPS
+from src.realtime_glm import AGE_GROUPS, describe_missing
 
 BR_TZ = ZoneInfo("America/Sao_Paulo")
 UTC_TZ = ZoneInfo("UTC")
@@ -208,9 +210,9 @@ def build_observed_map(lat: float, lon: float, radius_km: int,
 
     if geometry is not None:
         from shapely.geometry import mapping
-        from src.spatial_tools import padded_bounds
+        from src.spatial_tools import map_text, padded_bounds
         folium.GeoJson(
-            mapping(geometry), name=geometry_label, tooltip=geometry_label,
+            mapping(geometry), name=map_text(geometry_label), tooltip=map_text(geometry_label),
             style_function=lambda _: {"color": "#f43f5e", "weight": 2.5,
                                       "fillColor": "#f43f5e", "fillOpacity": 0.06},
         ).add_to(m)
@@ -381,6 +383,10 @@ def render_trend_tab(*, snapshot_loader=None):
         utc_mode = st.session_state.get("fv_trend_time_zone", kept_value("fv_trend_time_zone", "Brasília")) == "UTC"
         newest = snapshot.observation_end_utc.astimezone(UTC_TZ if utc_mode else BR_TZ)
         refresh_col.caption(f"Dados até {newest:%H:%M:%S} ({'UTC' if utc_mode else 'Brasília'})")
+        # A tendência compara 0–10, 10–20 e 20–30 min: uma lacuna parece dissipação.
+        missing_text = describe_missing(snapshot, UTC_TZ if utc_mode else BR_TZ, minutes=30)
+        if missing_text:
+            st.warning(missing_text + " A tendência desta janela não é confiável.")
 
     col_map, col_side = st.columns([1.7, 1], gap="large")
     state_geom = None  # geometria da área nos modos Retângulo/Estados/Municípios
@@ -427,8 +433,7 @@ def render_trend_tab(*, snapshot_loader=None):
                     state_label = chosen[0] if len(chosen) == 1 else area_label(ufs, "estados")
             except Exception as exc:
                 st.warning("Limites dos estados indisponíveis nesta sessão.")
-                with st.expander("Detalhes técnicos"):
-                    st.exception(exc)
+                show_error_details(exc)
 
         elif area_mode == "Municípios":
             try:
@@ -446,8 +451,7 @@ def render_trend_tab(*, snapshot_loader=None):
                         state_label = area_label(chosen, "municípios")
             except Exception as exc:
                 st.warning("Lista ou limites de municípios indisponíveis nesta sessão.")
-                with st.expander("Detalhes técnicos"):
-                    st.exception(exc)
+                show_error_details(exc)
 
         elif area_mode == "Arquivo":
             st.caption("Shapefile (ZIP com .shp, .shx, .dbf e .prj), KML, KMZ ou GeoJSON, até 20 MB. "
@@ -463,7 +467,7 @@ def render_trend_tab(*, snapshot_loader=None):
                         geom, label = area_from_upload(uploaded.name, blob)
                         st.session_state["fv_trend_file"] = {"digest": digest, "wkb": geom.wkb.hex(), "label": label}
                     except Exception as exc:
-                        st.error(f"Não foi possível usar o arquivo: {exc}")
+                        st.error(f"Não foi possível usar o arquivo: {error_text(exc)}")
             elif st.session_state.get("fv_user_polygon_wkb") and not st.session_state.get("fv_trend_file"):
                 # Área já importada na aba "Relâmpagos em tempo real".
                 if st.button("Usar a área importada na aba ao vivo", key="fv_trend_use_live_upload",
@@ -519,8 +523,7 @@ def render_trend_tab(*, snapshot_loader=None):
                         st.rerun()
             except Exception as exc:
                 st.warning("Lista de municípios indisponível nesta sessão.")
-                with st.expander("Detalhes da lista de cidades"):
-                    st.exception(exc)
+                show_error_details(exc, "Detalhes da lista de cidades")
 
         # Resultado logo abaixo da escolha da área: no celular as colunas empilham e o mapa e os cartões
         # ficam longe da lista; sem isto, escolher municípios parecia não fazer nada.
@@ -663,7 +666,7 @@ def render_trend_tab(*, snapshot_loader=None):
                         "key":trend_key,"png":png,"name":safe_name("tendencia",trend_area.label,
                                 snapshot.observation_end_utc.strftime("%Y%m%dT%H%MZ"))}
                 except Exception as e:
-                    st.error(f"Falha ao exportar a Tendência: {e}")
+                    st.error(f"Falha ao exportar a Tendência: {error_text(e)}")
             tr_board=st.session_state.get("fv_trend_png_export")
             if isinstance(tr_board,dict) and tr_board.get("key")==trend_key:
                 di1,di2=st.columns(2)
@@ -678,8 +681,7 @@ def render_trend_tab(*, snapshot_loader=None):
     st.markdown("### Atividade elétrica observada — GLM")
     if load_error is not None:
         st.warning("Não foi possível obter os flashes GLM neste momento.")
-        with st.expander("Detalhes técnicos"):
-            st.exception(load_error)
+        show_error_details(load_error)
     elif snapshot is None:
         st.info("A leitura dos flashes GLM não está configurada.")
     elif not has_area:
@@ -740,5 +742,4 @@ def render_trend_tab(*, snapshot_loader=None):
                 st.session_state.pop("fv_trend_table_handled", None)
         except Exception as exc:
             st.warning("Não foi possível calcular o panorama por estado.")
-            with st.expander("Detalhes técnicos"):
-                st.exception(exc)
+            show_error_details(exc)

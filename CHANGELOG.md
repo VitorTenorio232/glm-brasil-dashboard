@@ -1,5 +1,50 @@
 # Histórico de mudanças
 
+## 2026-11-23 (revisão de segurança, confiabilidade e desempenho)
+
+### Segurança
+- **Pillow 13:** `requirements.txt` limitava `Pillow<13`, e o pip-audit apontou 42 vulnerabilidades na 12.3
+  corrigidas na 13.0. Agora `Pillow>=13.0,<14` (o streamlit 1.66 aceita); as pranchas PNG/JPEG/GIF saem
+  idênticas byte a byte.
+- **Nome do arquivo enviado virava HTML/JS no mapa:** o folium põe o tooltip cru numa template string e o
+  Leaflet monta a lista de camadas com innerHTML. Um GeoJSON chamado `x<img src=x onerror=alert(1)>.geojson`
+  executava script na Tendência (e o rótulo também ia para o mapa da Climatologia). `map_text()` escapa
+  HTML, crase e cifrão.
+- **"Detalhes técnicos" sem traceback:** `st.exception()` ignora `client.showErrorDetails` e mostrava o
+  traceback completo (caminhos do servidor e do cache) a qualquer visitante. `src/erros.py` mostra só o tipo e
+  a mensagem, com caminhos e tokens removidos; o traceback vai para o log (`FLASH_VIEW_DEBUG=1` mostra tudo).
+
+### Correções
+- **Arquivo GLM corrompido derrubava o ao vivo:** um arquivo ilegível entre os ~270 da janela fazia a busca
+  inteira falhar, e como ele ficava no cache de disco o painel continuava fora do ar a cada minuto até o
+  arquivo sair da janela (~90 min). Agora o arquivo é ignorado, apagado do cache e baixado de novo na
+  atualização seguinte, com um aviso.
+- **Lacuna de dados parecia queda de atividade:** 10 min sem arquivos na NOAA apareciam como 246 flashes em
+  10–20 min (contra ~2.400), e a Tendência indicava dissipação. O ao vivo e a Tendência avisam quais minutos
+  estão sem arquivo.
+- **Séries: mês sem arquivo sumia:** o gráfico ligava o mês anterior ao seguinte e o CSV pulava a linha, sem
+  distinguir "0 flashes" de "sem observação". Agora o período fica em branco no gráfico, vazio no CSV (nova
+  coluna `situacao`: observado / sem arquivo na base) e a aba avisa quais períodos faltam.
+- Prazos explícitos para a NOAA (10 s para conectar, 30 s por leitura, 4 tentativas); o padrão do botocore
+  era 60 s + 60 s com 5 tentativas, com todas as sessões esperando a mesma busca.
+
+### Desempenho (medido; detalhes na revisão)
+- **Gerar mapa (Climatologia):** a máscara de células testava a borda à parte (`intersects_xy` em
+  `geometry.boundary`, ~0,35 s em MG, duas vezes por mapa). `cells_in_geometry()` dá a mesma máscara em ~6 ms.
+  MG jan/2025: 1,84 s → 0,52 s; repetir a consulta: 1,28 s → 0,26 s.
+- **Catálogo lido uma vez:** cada período ou área nova criava outro repositório e relia a lista de arquivos
+  (no Hugging Face, uma chamada `list_repo_files` por consulta). Agora usa o repositório já lido.
+- **Séries:** PNG, JPEG e CSV montados uma vez por resultado (`_series_downloads`), e os botões de download
+  (Séries, Ranking, NetCDF) não rodam a página de novo. Rerun com a série na tela: 1,11 s → 0,15 s.
+- **Hugging Face no commit do catálogo:** o catálogo vem de `dataset_info` (lista de arquivos e commit
+  numa chamada só, ~0,4 s, em vez dos 5 pedidos de `list_repo_files`), e `hf_hub_download` recebe esse
+  commit. Com o arquivo em cache, o download não vai mais à rede (antes: um HEAD por arquivo). Dataset real,
+  série mensal de 24 meses com cache: 5,1 s e 24 pedidos → 1,6 s e 0 pedidos; abrir a aba: 2,8 s → 1,8 s.
+  Também resolve o alerta B615 do Bandit e mantém catálogo e arquivos no mesmo commit (se o commit sumir do
+  Dataset, baixa do commit atual).
+- **Ao vivo:** um GET por arquivo em vez de HeadObject + GetObject. Primeira abertura a frio: 545 → 274
+  pedidos à NOAA; download dos 271 arquivos: 11,8 s → 7,3 s (média de 3 rodadas).
+
 ## 2026-11-23 (anéis do alarme)
 
 ### Novidades

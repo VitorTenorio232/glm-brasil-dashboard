@@ -128,6 +128,51 @@ class SourceConfig:
         return "não configurada"
 
 
+def hf_listing(config: SourceConfig) -> tuple[list[str], str]:
+    """Arquivos do Dataset (sem o prefixo configurado) e o commit atual, numa chamada só.
+
+    ``dataset_info`` devolve a lista de arquivos e o ``sha`` do commit (~0,4 s), enquanto
+    ``list_repo_files`` pagina a árvore em 5 pedidos (~1,3 s) e não diz qual commit leu.
+    """
+    from huggingface_hub import HfApi
+
+    api = HfApi(token=os.getenv(config.hf_token_env) or None)
+    info = api.dataset_info(config.hf_repo, files_metadata=False)
+    if info.siblings is not None:
+        files = [sibling.rfilename for sibling in info.siblings]
+    else:
+        files = api.list_repo_files(config.hf_repo, repo_type="dataset", revision=info.sha)
+    prefix = config.hf_prefix.strip("/")
+    if prefix:
+        prefix_slash = prefix + "/"
+        files = [f[len(prefix_slash):] for f in files if f.startswith(prefix_slash)]
+    return list(files), info.sha
+
+
+def hf_download(config: SourceConfig, relpath: str, revision: str | None) -> Path:
+    """Baixa (ou acha no cache) um arquivo do Dataset no commit lido no catálogo.
+
+    Com ``revision`` = hash do commit, o huggingface_hub devolve o arquivo do cache sem ir à
+    rede; sem ela, cada leitura fazia um HEAD na main (~0,2 s por arquivo: 24 numa série
+    mensal de dois anos). Também deixa catálogo e arquivos no mesmo commit. Se o commit
+    sumir do Dataset (histórico reescrito), baixa do commit atual.
+    """
+    from huggingface_hub import hf_hub_download
+    from huggingface_hub.errors import RevisionNotFoundError
+
+    prefix = config.hf_prefix.strip("/")
+    kwargs = dict(repo_id=config.hf_repo, repo_type="dataset",
+                  filename=f"{prefix}/{relpath}" if prefix else relpath,
+                  token=os.getenv(config.hf_token_env) or None)
+    try:
+        return Path(hf_hub_download(**kwargs, revision=revision))
+    except RevisionNotFoundError:
+        if revision is None:
+            raise
+        _, current = hf_listing(config)
+        return Path(hf_hub_download(**kwargs, revision=current))
+
+
 class HistoricalGLMRepository:
     """Acesso aos produtos históricos processados do Flash View.
 
@@ -147,6 +192,7 @@ class HistoricalGLMRepository:
         self.config = config
         self._catalog: list[CatalogItem] | None = None
         self._remote_files: list[str] | None = None
+        self._revision: str | None = None  # commit do Dataset lido no catálogo
 
     # ------------------------------------------------------------------
     # Catálogo
@@ -159,16 +205,7 @@ class HistoricalGLMRepository:
             return [p.relative_to(root).as_posix() for p in root.rglob("*.nc")]
 
         if self._remote_files is None:
-            from huggingface_hub import HfApi
-
-            token = os.getenv(self.config.hf_token_env) or None
-            api = HfApi(token=token)
-            files = api.list_repo_files(repo_id=self.config.hf_repo, repo_type="dataset")
-            prefix = self.config.hf_prefix.strip("/")
-            if prefix:
-                prefix_slash = prefix + "/"
-                files = [f[len(prefix_slash):] for f in files if f.startswith(prefix_slash)]
-            self._remote_files = list(files)
+            self._remote_files, self._revision = hf_listing(self.config)
         return list(self._remote_files)
 
     def scan(self, force: bool = False) -> list[CatalogItem]:
@@ -273,18 +310,9 @@ class HistoricalGLMRepository:
                 raise FileNotFoundError(path)
             return path
 
-        from huggingface_hub import hf_hub_download
-
-        prefix = self.config.hf_prefix.strip("/")
-        remote_name = f"{prefix}/{relpath}" if prefix else relpath
-        token = os.getenv(self.config.hf_token_env) or None
-        local = hf_hub_download(
-            repo_id=self.config.hf_repo,
-            repo_type="dataset",
-            filename=remote_name,
-            token=token,
-        )
-        return Path(local)
+        if self._remote_files is None:
+            self._list_relative_files()  # lê o catálogo e fixa o commit
+        return hf_download(self.config, relpath, self._revision)
 
     @staticmethod
     def _decode_attr(value):
@@ -543,6 +571,42 @@ class HistoricalGLMRepository:
         return pd.DataFrame(rows)
 
 
+SERIES_OBSERVED = "observado"
+SERIES_NO_CELLS = "sem células válidas"
+SERIES_NO_FILE = "sem arquivo na base"
+
+
+def complete_series(series: pd.DataFrame, scale: str, start, end) -> pd.DataFrame:
+    """Série com todos os períodos de [start, end]; os que não têm arquivo entram com valor vazio.
+
+    Antes um mês sem arquivo simplesmente sumia: o gráfico ligava o mês anterior ao seguinte e o CSV
+    pulava a linha, sem distinguir "0 flashes observados" de "sem observação". A coluna ``situacao``
+    diz qual é o caso; o valor vazio interrompe a linha do gráfico.
+    """
+    freq = {"daily": "D", "monthly": "MS", "yearly": "YS"}[scale]
+    start = pd.Timestamp(start).normalize()
+    end = pd.Timestamp(end).normalize()
+    if scale == "monthly":
+        start = start.replace(day=1)
+    elif scale == "yearly":
+        start = start.replace(month=1, day=1)
+    out = series.copy()
+    if out.empty:
+        out = pd.DataFrame(columns=["date", "year", "month", "day", "value", "relpath"])
+    out["date"] = pd.to_datetime(out["date"])
+    values = pd.to_numeric(out["value"], errors="coerce")
+    out["situacao"] = np.where(np.isfinite(values), SERIES_OBSERVED, SERIES_NO_CELLS)
+    expected = pd.date_range(start, end, freq=freq)
+    missing = expected.difference(pd.DatetimeIndex(out["date"]))
+    if len(missing):
+        filler = pd.DataFrame({
+            "date": missing, "year": missing.year, "month": missing.month, "day": missing.day,
+            "value": np.nan, "relpath": "", "situacao": SERIES_NO_FILE,
+        })
+        out = pd.concat([out, filler], ignore_index=True) if not out.empty else filler
+    return out.sort_values("date").reset_index(drop=True)
+
+
 # =============================================================================
 # Configuração da fonte histórica
 # =============================================================================
@@ -744,6 +808,19 @@ def _robust_range(data: np.ndarray, variable: str):
     return vmin, vmax
 
 
+def cells_in_geometry(geometry, x, y) -> np.ndarray:
+    """Pontos (centros de células) dentro da geometria ou sobre a borda dela.
+
+    ``intersects_xy`` no próprio polígono dá o mesmo resultado que ``contains_xy`` mais
+    ``intersects_xy`` na borda (``geometry.boundary``), sem montar e testar a borda à parte:
+    em Minas Gerais (15,6 mil células) caiu de ~0,35 s para ~6 ms, e isso rodava duas vezes a
+    cada "Gerar mapa".
+    """
+    from shapely import intersects_xy
+
+    return np.asarray(intersects_xy(geometry, x, y), dtype=bool)
+
+
 def _rgba_clipped_to_country(
     data: np.ndarray,
     lat: np.ndarray,
@@ -776,16 +853,8 @@ def _rgba_clipped_to_country(
 
     if clip_geometry is not None:
         try:
-            from shapely import contains_xy, intersects_xy
-
             xx, yy = np.meshgrid(lon, lat)
-            spatial_mask = contains_xy(clip_geometry, xx, yy)
-            # Inclui pontos exatamente sobre a borda, quando existirem.
-            try:
-                spatial_mask |= intersects_xy(clip_geometry.boundary, xx, yy)
-            except Exception:
-                pass
-            visible &= np.asarray(spatial_mask, dtype=bool)
+            visible &= cells_in_geometry(clip_geometry, xx, yy)
         except Exception:
             # Se a máscara vetorizada não estiver disponível, preserva o raster e
             # mantém o limite vetorial desenhado por cima em vez de falhar o mapa.
@@ -831,14 +900,8 @@ def clip_field_to_geometry(
     data2 = np.asarray(data2, dtype=np.float64).copy()
     if geometry is not None:
         try:
-            from shapely import contains_xy, intersects_xy
             xx, yy = np.meshgrid(lon2, lat2)
-            mask = contains_xy(geometry, xx, yy)
-            try:
-                mask |= intersects_xy(geometry.boundary, xx, yy)
-            except Exception:
-                pass
-            data2[~np.asarray(mask, dtype=bool)] = np.nan
+            data2[~cells_in_geometry(geometry, xx, yy)] = np.nan
         except Exception:
             pass
     return np.asarray(lat2), np.asarray(lon2), data2
@@ -867,6 +930,8 @@ def build_historical_map(
     from branca.colormap import LinearColormap
     from folium.plugins import Fullscreen
     import matplotlib
+
+    from src.spatial_tools import map_text
 
     # Primeiro reduz a matriz ao retângulo mínimo da área escolhida. Isso evita
     # processar a grade brasileira inteira quando o usuário seleciona estado ou município.
@@ -943,7 +1008,7 @@ def build_historical_map(
         bounds=[[south, west], [north, east]],
         origin="lower",
         pixelated=True,
-        name=layer_name,
+        name=map_text(layer_name),
         opacity=1.0,
         interactive=False,
         cross_origin=False,
@@ -957,7 +1022,7 @@ def build_historical_map(
             from shapely.geometry import mapping
             folium.GeoJson(
                 data=mapping(clip_geometry),
-                name=boundary_name,
+                name=map_text(boundary_name),
                 style_function=lambda _: {
                     "color": "#ffffff",
                     "weight": 2.0,

@@ -60,9 +60,13 @@ def unsigned_s3_client():
     from botocore import UNSIGNED
     from botocore.config import Config
 
+    # Prazos explícitos: o padrão do botocore é 60 s para conectar e 60 s por leitura, com 5 tentativas.
+    # No site, a busca roda com o cache travado e todas as sessões esperam por ela; com a NOAA
+    # pendurada, a espera passava de minutos. 10 s/30 s ainda cobrem um arquivo LCFA (~0,3 MB) com folga.
     return boto3.client(
         "s3",
-        config=Config(signature_version=UNSIGNED, retries={"max_attempts": 5, "mode": "standard"}),
+        config=Config(signature_version=UNSIGNED, connect_timeout=10, read_timeout=30,
+                      retries={"max_attempts": 4, "mode": "standard"}),
         region_name="us-east-1",
     )
 

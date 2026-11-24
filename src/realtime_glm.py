@@ -3,20 +3,28 @@ from __future__ import annotations
 from concurrent.futures import ThreadPoolExecutor, as_completed
 from dataclasses import dataclass
 from datetime import datetime, timedelta, timezone
+import logging
+import os
 from pathlib import Path
+import shutil
 import tempfile
+import threading
 
 import numpy as np
 import pandas as pd
 
 from .glm_aws import iter_hours, list_hour_keys, unsigned_s3_client
-from .glm_reader import read_glm_files
+from .glm_reader import read_glm_files_tolerant
 from .alertas_flash import add_collapsible_glm_legend
 
 # Recorte operacional do mapa. Mantém o Brasil inteiro e uma pequena margem.
 # Ordem: lon_min, lat_min, lon_max, lat_max.
 BRAZIL_VIEW_BBOX = (-75.5, -35.5, -32.0, 6.5)
 LIVE_CACHE_DIR = Path(tempfile.gettempdir()) / "glm_brasil_live"
+# Cadência do GLM-L2-LCFA: um arquivo a cada 20 s. Trechos maiores que isto sem arquivo são lacunas.
+LCFA_STEP = timedelta(seconds=20)
+MAX_GAP = timedelta(seconds=60)
+_LOG = logging.getLogger(__name__)
 
 AGE_GROUPS = [
     ("0–5 min", 0.0, 5.0, "#ff2d20"),
@@ -35,6 +43,9 @@ class LiveSnapshot:
     source_files: int
     newest_file_start_utc: datetime
     latency_seconds: float
+    # Trechos da janela sem arquivo LCFA (fonte com falha ou arquivo ilegível): (início, fim) em UTC.
+    gaps: tuple[tuple[datetime, datetime], ...] = ()
+    unreadable_files: int = 0
 
     @property
     def latency_minutes(self) -> float:
@@ -64,11 +75,17 @@ def _download_key(client, bucket: str, key: str) -> Path:
     LIVE_CACHE_DIR.mkdir(parents=True, exist_ok=True)
     target = LIVE_CACHE_DIR / Path(key).name
     if not target.exists() or target.stat().st_size == 0:
-        tmp = target.with_suffix(target.suffix + ".part")
-        if tmp.exists():
+        # Um GET só: download_file fazia HeadObject + GetObject (542 pedidos em vez de 271 na
+        # primeira abertura). O StreamingBody confere o Content-Length ao terminar a leitura.
+        # Nome temporário único: duas threads/processos não escrevem no mesmo .part.
+        tmp = target.with_name(f"{target.name}.{os.getpid()}-{threading.get_ident()}.part")
+        try:
+            body = client.get_object(Bucket=bucket, Key=key)["Body"]
+            with open(tmp, "wb") as fh:
+                shutil.copyfileobj(body, fh, 1024 * 1024)
+            tmp.replace(target)
+        finally:
             tmp.unlink(missing_ok=True)
-        client.download_file(bucket, key, str(tmp))
-        tmp.replace(target)
     return target
 
 
@@ -95,6 +112,51 @@ def _prune_cache(keep: set[str]) -> None:
                     p.unlink(missing_ok=True)
             except OSError:
                 pass
+
+
+def coverage_gaps(file_starts, window_start: datetime, observation_end: datetime,
+                  *, max_gap: timedelta = MAX_GAP) -> tuple[tuple[datetime, datetime], ...]:
+    """Trechos de [window_start, observation_end] sem arquivo LCFA (cada arquivo cobre 20 s).
+
+    Sem isso, minutos sem dados apareciam como queda de atividade (ex.: 10–20 min com 256 flashes
+    em vez de ~2.500) e a tendência parecia de dissipação.
+    """
+    gaps = []
+    covered_until = window_start
+    for start in sorted(file_starts):
+        if start - covered_until > max_gap:
+            gaps.append((covered_until, start))
+        covered_until = max(covered_until, start + LCFA_STEP)
+    if observation_end - covered_until > max_gap:
+        gaps.append((covered_until, observation_end))
+    return tuple(gaps)
+
+
+def missing_periods(snapshot: "LiveSnapshot", minutes: float = 30) -> list[tuple[datetime, datetime]]:
+    """Lacunas que caem nos últimos ``minutes`` minutos da janela, recortadas a esse intervalo."""
+    lower = snapshot.observation_end_utc - timedelta(minutes=minutes)
+    out = []
+    for start, end in snapshot.gaps:
+        if end > lower:
+            out.append((max(start, lower), end))
+    return out
+
+
+def describe_missing(snapshot: "LiveSnapshot", tz, minutes: float = 30) -> str | None:
+    """Aviso de dados incompletos nos últimos ``minutes`` min (None se a janela está completa)."""
+    parts = []
+    gaps = missing_periods(snapshot, minutes)
+    if gaps:
+        total = sum((end - start).total_seconds() for start, end in gaps) / 60
+        spans = ", ".join(f"{start.astimezone(tz):%H:%M}–{end.astimezone(tz):%H:%M}" for start, end in gaps[:4])
+        parts.append(f"faltam arquivos GLM em {spans} (≈{max(total, 1):.0f} min dos últimos {minutes:.0f} min)")
+    if snapshot.unreadable_files:
+        parts.append(f"{snapshot.unreadable_files} arquivo(s) ilegível(is) foi(ram) ignorado(s) e será(ão) "
+                     "baixado(s) de novo na próxima atualização")
+    if not parts:
+        return None
+    return ("⚠️ Dados incompletos: " + "; ".join(parts) + ". As contagens desses trechos ficam abaixo do "
+            "real: é falta de dado, não queda de atividade.")
 
 
 def _filter_view_bbox(df: pd.DataFrame) -> pd.DataFrame:
@@ -179,7 +241,17 @@ def fetch_live_snapshot(
     paths = _download_selected(client, selected, max_workers=max_workers)
     _prune_cache({p.name for p in paths})
 
-    flashes = read_glm_files(paths, quality=quality)
+    flashes, unreadable = read_glm_files_tolerant(paths, quality=quality)
+    if unreadable:
+        _LOG.warning("Arquivos GLM ilegíveis ignorados: %s", ", ".join(p.name for p in unreadable))
+        # Sai do cache de disco para ser baixado de novo na próxima atualização. Antes o arquivo
+        # ruim ficava lá e derrubava o painel a cada minuto até sair da janela (~90 min).
+        for bad in unreadable:
+            bad.unlink(missing_ok=True)
+        if len(unreadable) == len(paths):
+            raise RuntimeError("Nenhum arquivo GLM da janela pôde ser lido.")
+    bad_names = {p.name for p in unreadable}
+    starts = [ts for _, key, ts in selected if Path(key).name not in bad_names]
     if not flashes.empty:
         flashes["time_start"] = pd.to_datetime(flashes["time_start"], utc=True, errors="coerce")
         flashes = flashes[
@@ -199,6 +271,8 @@ def fetch_live_snapshot(
         source_files=len(selected),
         newest_file_start_utc=newest_file_start,
         latency_seconds=latency,
+        gaps=coverage_gaps(starts, window_start, observation_end),
+        unreadable_files=len(unreadable),
     )
 
 

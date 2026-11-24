@@ -103,6 +103,7 @@ def export_area_selector(*, prefix: str, applied_geom=None, applied_label='Área
     Não modifica estado de nenhum widget após sua criação.
     """
     import streamlit as st
+    from src.erros import show_error_details
     from src.historical_glm import load_states, load_municipalities, get_municipality_geometry, get_state_geometry
     from src.spatial_tools import circular_buffer_geometry, build_rectangle_selector_map, geometry_from_geojson
     from streamlit_folium import st_folium
@@ -230,6 +231,5 @@ def export_area_selector(*, prefix: str, applied_geom=None, applied_label='Área
             st.warning(f'Área de exportação indisponível: {exc}')
         except Exception as exc:
             st.warning('Não foi possível carregar essa geometria. Confira os dados administrativos locais.')
-            with st.expander('Detalhes técnicos'):
-                st.exception(exc)
+            show_error_details(exc)
         return None

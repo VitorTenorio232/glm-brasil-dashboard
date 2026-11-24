@@ -15,9 +15,10 @@ import plotly.graph_objects as go
 import streamlit as st
 from streamlit_folium import st_folium
 
-from src.realtime_glm import AGE_GROUPS, fetch_live_snapshot, group_counts
+from src.realtime_glm import AGE_GROUPS, describe_missing, fetch_live_snapshot, group_counts
 from src.maplibre_realtime import flash_payload, show_realtime_map
 from src.alarme import RING_KM, browser_alarm_payload, edge_distance_km
+from src.erros import error_text, show_error_details
 from src.estado_abas import keep_widget_values, kept_value
 from src.area_ao_vivo import (clear_live_area, live_area_mode_control, queue_map_point, queue_map_rectangle,
                               render_live_area_panel)
@@ -32,6 +33,8 @@ from src.historical_glm import (
     SourceConfig,
     build_historical_map,
     clip_field_to_geometry,
+    complete_series,
+    SERIES_OBSERVED,
     fixed_map_range,
     format_value,
     get_municipality_geometry,
@@ -329,7 +332,9 @@ def _specific_field(
     day: int | None,
     variable: str,
 ):
-    repo = HistoricalGLMRepository(config)
+    # Reaproveita o catálogo já lido: um repositório novo relia todos os arquivos (no Hugging Face,
+    # uma chamada list_repo_files) a cada período novo.
+    repo = _get_repo(config)
     if scale == "daily":
         item = repo.get_daily(year, int(month), int(day))
     elif scale == "monthly":
@@ -342,7 +347,7 @@ def _specific_field(
 
 @st.cache_data(ttl=3600, max_entries=16, show_spinner=False)
 def _climatology_field(config: SourceConfig, scale: str, month: int | None, years: tuple[int, ...], variable: str):
-    repo = HistoricalGLMRepository(config)
+    repo = _get_repo(config)
     if scale == "monthly":
         items = [repo.get_monthly(y, int(month)) for y in years]
     else:
@@ -396,7 +401,7 @@ def _series_cached(
 ) -> pd.DataFrame:
     from shapely import from_wkb
 
-    repo = HistoricalGLMRepository(config)
+    repo = _get_repo(config)
     geom = from_wkb(geometry_wkb)
     return repo.series_for_geometry(
         geom,
@@ -408,14 +413,15 @@ def _series_cached(
 
 
 
-@st.cache_resource(show_spinner=False)
+# Mesmo prazo do repositório histórico: rankings novos no Dataset aparecem sem reiniciar o app.
+@st.cache_resource(ttl="6h", show_spinner=False)
 def _get_ranking_repo(config: SourceConfig) -> RankingRepository:
     return RankingRepository(config)
 
 
 @st.cache_data(ttl=3600, max_entries=8, show_spinner=False)
 def _ranking_data(config: SourceConfig, level: str, scale: str) -> pd.DataFrame:
-    repo = RankingRepository(config)
+    repo = _get_ranking_repo(config)
     return repo.load(level, scale)
 
 
@@ -487,7 +493,7 @@ def _file_area(payload: dict, prefix: str) -> tuple[dict, bool]:
                 geom, label = area_from_upload(uploaded.name, blob)
                 st.session_state[f"{prefix}_file"] = {"digest": digest, "wkb": geom.wkb.hex(), "label": label}
             except Exception as exc:
-                st.error(f"Não foi possível usar o arquivo: {exc}")
+                st.error(f"Não foi possível usar o arquivo: {error_text(exc)}")
     stored = st.session_state.get(f"{prefix}_file")
     if not stored:
         others = _uploaded_areas(exclude=prefix)
@@ -704,6 +710,36 @@ def _field_netcdf_bytes(lat, lon, data, *, variable: str, title: str) -> bytes:
 def _series_csv_bytes(data: pd.DataFrame) -> bytes:
     return data.to_csv(index=False).encode("utf-8-sig")
 
+
+@st.cache_data(ttl=3600, max_entries=16, show_spinner=False)
+def _series_downloads(
+    series_frame: pd.DataFrame,
+    compare_frame: pd.DataFrame,
+    compare_label: str | None,
+    *,
+    scale: str,
+    variable: str,
+    location_label: str,
+) -> tuple[bytes, bytes, bytes]:
+    """PNG, JPEG e CSV da série mostrada, montados uma vez por resultado.
+
+    Antes a prancha (matplotlib + Pillow) era refeita a cada rerun da aba, inclusive ao clicar
+    num download: ~1 s por interação com a série na tela (medido com o AppTest).
+    Recebe a série completa (``complete_series``): períodos sem arquivo ficam vazios no CSV.
+    """
+    png = render_image_board(
+        _series_figure_png(series_frame, scale=scale, variable=variable, location_label=location_label,
+                           compare=compare_frame if not compare_frame.empty else None,
+                           compare_label=compare_label),
+        meta=BoardMeta(product="Série temporal: " + VARIABLES[variable]["label"],
+                       region=location_label, period=f"Série {scale}",
+                       resolution="Produto histórico GLM", basemap="satellite"),
+        chart_kind="Série temporal")
+    csv_frame = series_frame.assign(area=location_label)
+    if not compare_frame.empty:
+        csv_frame = pd.concat([csv_frame, compare_frame.assign(area=compare_label)], ignore_index=True)
+    return png, to_jpeg(png), _series_csv_bytes(csv_frame)
+
 # =============================================================================
 # CABEÇALHO
 # =============================================================================
@@ -776,8 +812,7 @@ def _live_panel():
             snapshot = _load_snapshot()
     except Exception as exc:
         st.error("Não foi possível obter os dados GLM mais recentes.")
-        with st.expander("Detalhes técnicos"):
-            st.exception(exc)
+        show_error_details(exc)
         return
 
     selected_geometry = live_area.geometry
@@ -829,6 +864,9 @@ def _live_panel():
             "⚠️ O último arquivo disponível está desatualizado em relação ao horário atual. "
             "Confira a data e a hora observadas acima."
         )
+    missing_text = describe_missing(snapshot, chosen_tz, minutes=30)
+    if missing_text:
+        st.warning(missing_text)
 
     if selected_geometry is not None:
         info_col, clear_col = st.columns([0.84, 0.16], vertical_alignment="center")
@@ -936,7 +974,7 @@ def _live_panel():
                         "key":live_key,"png":png,"name":safe_name("tempo_real",export_area.label,
                             snapshot.observation_end_utc.strftime("%Y%m%dT%H%MZ"))}
                 except Exception as e:
-                    st.error(f"Não foi possível gerar a imagem: {e}")
+                    st.error(f"Não foi possível gerar a imagem: {error_text(e)}")
         with lc2:
             if st.button("🎞️ Preparar GIF (1 h)",key="fv_live_prepare_gif", disabled=export_area is None):
                 # Cada quadro tem fundo cartográfico + shapes + janela móvel de 30 min.
@@ -955,7 +993,7 @@ def _live_panel():
                     st.session_state["fv_live_gif_export"] = {"key": live_key, "gif": gif}
                 except Exception as exc:
                     st.session_state.pop("fv_live_gif_export", None)
-                    st.error(f"Não foi possível gerar o GIF com o mapa-base: {exc}")
+                    st.error(f"Não foi possível gerar o GIF com o mapa-base: {error_text(exc)}")
         live_export = st.session_state.get("fv_live_board")
         if live_export and live_export.get("key") == live_key:
             dl1,dl2=st.columns(2)
@@ -1014,8 +1052,7 @@ def _historical_unavailable():
         "Tente novamente em instantes; se o problema persistir, consulte os detalhes técnicos."
     )
     if historical_error is not None:
-        with st.expander("Detalhes técnicos"):
-            st.exception(historical_error)
+        show_error_details(historical_error)
 
 
 # Indicador discreto da origem histórica (sem expor o token).
@@ -1417,8 +1454,7 @@ if tab_clim.open:
                         }
                     except Exception as exc:
                         st.error("Não foi possível gerar o produto histórico selecionado.")
-                        with st.expander("Detalhes técnicos"):
-                            st.exception(exc)
+                        show_error_details(exc)
 
                 result = st.session_state.get("historical_map_result")
                 if result is not None:
@@ -1517,7 +1553,7 @@ if tab_clim.open:
                                         "key":hist_key,"png":p,"name":safe_name(result["variable"],
                                             export_area.label,result["period_text"])}
                                 except Exception as exc:
-                                    st.error(f"Falha na exportação cartográfica: {exc}")
+                                    st.error(f"Falha na exportação cartográfica: {error_text(exc)}")
                             board=st.session_state.get("fv_hist_board")
                             if board and board.get("key") == hist_key:
                                 d1,d2=st.columns(2)
@@ -1532,7 +1568,8 @@ if tab_clim.open:
                         st.download_button("⬇️ Dados NetCDF",nc_bytes,
                             file_name=safe_name(result["variable"],result.get("location_label","Brasil"),
                                                  result["period_text"],extension="nc"),
-                            mime="application/x-netcdf",key=f"map_nc_{result['render_id']}")
+                            mime="application/x-netcdf",key=f"map_nc_{result['render_id']}",
+                            on_click="ignore")
 
                         if result.get("anomaly"):
                             st.caption(
@@ -1773,10 +1810,31 @@ if tab_series.open:
 
                             compare = st.session_state.get("historical_series_compare")
                             compare_label, compare_valid = None, pd.DataFrame()
+                            compare_full = pd.DataFrame()
                             if compare is not None:
                                 compare_label, compare_raw = compare
                                 if compare_raw is not None and not compare_raw.empty:
                                     compare_valid = compare_raw[np.isfinite(compare_raw["value"])].copy()
+                                    compare_full = complete_series(compare_raw, series_scale, start_ts, end_ts)
+
+                            # Todos os períodos pedidos: 0 observado ≠ período sem arquivo (fica vazio).
+                            full = complete_series(series, series_scale, start_ts, end_ts)
+                            no_data = full[full["situacao"] != SERIES_OBSERVED]
+                            if not no_data.empty:
+                                def _period_label(ts):
+                                    ts = pd.Timestamp(ts)
+                                    if series_scale == "daily":
+                                        return ts.strftime("%d/%m/%Y")
+                                    if series_scale == "monthly":
+                                        return f"{MONTH_NAMES_PT[ts.month]}/{ts.year}"
+                                    return str(ts.year)
+                                listed = ", ".join(_period_label(d) for d in no_data["date"][:8])
+                                more = f" e mais {len(no_data) - 8}" if len(no_data) > 8 else ""
+                                st.info(
+                                    f"ℹ️ {len(no_data)} período(s) sem dado na base: {listed}{more}. "
+                                    "Ficam em branco no gráfico e vazios no CSV (coluna `situacao`); "
+                                    "não é o mesmo que 0 flashes. A média e o máximo usam só os períodos com dado."
+                                )
 
                             c1, c2, c3 = st.columns(3)
                             with c1:
@@ -1810,13 +1868,14 @@ if tab_series.open:
 
                             fig = go.Figure()
                             fig.add_trace(go.Scatter(
-                                x=_x_values(valid), y=valid["value"], mode="lines+markers",
-                                name=location_label, hovertemplate=hover,
+                                x=_x_values(full), y=full["value"], mode="lines+markers",
+                                name=location_label, hovertemplate=hover, connectgaps=False,
                             ))
                             if not compare_valid.empty:
                                 fig.add_trace(go.Scatter(
-                                    x=_x_values(compare_valid), y=compare_valid["value"],
+                                    x=_x_values(compare_full), y=compare_full["value"],
                                     mode="lines+markers", name=compare_label, hovertemplate=hover,
+                                    connectgaps=False,
                                 ))
                             title_places = (f"{location_label} × {compare_label}"
                                             if not compare_valid.empty else location_label)
@@ -1839,21 +1898,9 @@ if tab_series.open:
 
                             st.markdown("---")
                             st.markdown("**Downloads da série**")
-                            png_bytes = render_image_board(
-                                _series_figure_png(valid, scale=series_scale,
-                                    variable=series_variable,location_label=location_label,
-                                    compare=compare_valid if not compare_valid.empty else None,
-                                    compare_label=compare_label),
-                                meta=BoardMeta(product="Série temporal: "+VARIABLES[series_variable]["label"],
-                                    region=location_label,period=f"Série {series_scale}",
-                                    resolution="Produto histórico GLM",basemap="satellite"),
-                                chart_kind="Série temporal")
-                            csv_frame = valid.assign(area=location_label)
-                            if not compare_valid.empty:
-                                csv_frame = pd.concat(
-                                    [csv_frame, compare_valid.assign(area=compare_label)], ignore_index=True
-                                )
-                            csv_bytes = _series_csv_bytes(csv_frame)
+                            png_bytes, jpeg_bytes, csv_bytes = _series_downloads(
+                                full, compare_full, compare_label, scale=series_scale,
+                                variable=series_variable, location_label=location_label)
                             d1, d2, d3, dspace = st.columns([1.35, 1.35, 1.35, 2.0])
                             with d1:
                                 st.download_button(
@@ -1865,13 +1912,14 @@ if tab_series.open:
                                     ),
                                     mime="image/png",
                                     width="stretch",
+                                    on_click="ignore",
                                 )
                             with d3:
                                 st.download_button(
-                                    "⬇️ Figura JPEG", data=to_jpeg(png_bytes),
+                                    "⬇️ Figura JPEG", data=jpeg_bytes,
                                     file_name=(f"flash_view_{_safe_filename(location_label)}_"
                                                f"{series_scale}_{series_variable}.jpg"),
-                                    mime="image/jpeg",width="stretch",
+                                    mime="image/jpeg",width="stretch", on_click="ignore",
                                 )
                             with d2:
                                 st.download_button(
@@ -1883,6 +1931,7 @@ if tab_series.open:
                                     ),
                                     mime="text/csv",
                                     width="stretch",
+                                    on_click="ignore",
                                 )
 
                             if series_variable == "flash_count":
@@ -1901,8 +1950,7 @@ if tab_series.open:
 
             except Exception as exc:
                 st.error("Não foi possível configurar ou gerar a série temporal selecionada.")
-                with st.expander("Detalhes técnicos"):
-                    st.exception(exc)
+                show_error_details(exc)
 
 
 
@@ -2014,12 +2062,10 @@ if tab_rank.open:
                                 "O produto de ranking ainda não foi encontrado em **05_RANKINGS**. "
                                 "Processe os arquivos administrativos com o script fornecido e envie os Parquet para o Dataset."
                             )
-                            with st.expander("Detalhes técnicos"):
-                                st.exception(exc)
+                            show_error_details(exc)
                         except Exception as exc:
                             st.error("Não foi possível gerar o ranking selecionado.")
-                            with st.expander("Detalhes técnicos"):
-                                st.exception(exc)
+                            show_error_details(exc)
 
                 if st.session_state.get("ranking_signature") == rank_signature:
                     rank_df = st.session_state.get("ranking_result", pd.DataFrame())
@@ -2080,15 +2126,18 @@ if tab_rank.open:
                             metric_text=f"{len(display)} localidades")
                         rk1,rk2,rk3=st.columns(3)
                         rk1.download_button("⬇️ Ranking PNG",rank_png,
-                            file_name="flash_view_ranking.png",mime="image/png",key="fv_rank_png")
+                            file_name="flash_view_ranking.png",mime="image/png",key="fv_rank_png",
+                            on_click="ignore")
                         rk2.download_button("⬇️ Ranking JPEG",to_jpeg(rank_png),
-                            file_name="flash_view_ranking.jpg",mime="image/jpeg",key="fv_rank_jpg")
+                            file_name="flash_view_ranking.jpg",mime="image/jpeg",key="fv_rank_jpg",
+                            on_click="ignore")
                         st.download_button(
                             "⬇️ Baixar ranking (CSV)",
                             display.to_csv(index=False).encode("utf-8-sig"),
                             file_name=f"flash_view_ranking_{rank_level}_{rank_scale}.csv",
                             mime="text/csv",
                             key="download_ranking_csv",
+                            on_click="ignore",
                         )
 
 # =============================================================================
