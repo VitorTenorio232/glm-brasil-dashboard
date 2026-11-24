@@ -11,6 +11,12 @@
   anel rearma depois de 30 min sem relâmpagos; os de dentro da área contam, para não tocar de novo quando a
   tempestade sai. A distância até a borda usa um índice dos segmentos da borda (estado de Minas: ~0,1 s).
 
+- **Climatologia e Séries temporais com recorte por arquivo:** nova opção **Arquivo** no recorte (e na segunda
+  área da comparação): shapefile em ZIP, KML, KMZ ou GeoJSON, como na aba ao vivo e na Tendência. Dá para
+  reaproveitar um arquivo já enviado em outra aba (por exemplo, a bacia subida no mapa ao vivo). O polígono é
+  simplificado a ~200 m para a grade de 0,08°; o mapa recorta pelos centros das células e a série usa a fração
+  de área de cada célula. As escolhas dessas abas também sobrevivem à troca de aba.
+
 ### Correções
 - **Área perdida ao trocar de aba:** o site só desenha a aba aberta, e o Streamlit apaga o valor dos campos que
   não foram desenhados. Sair da aba ao vivo e voltar zerava a barra "Área no mapa", mas o arquivo importado

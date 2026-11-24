@@ -18,7 +18,7 @@ from streamlit_folium import st_folium
 from src.realtime_glm import AGE_GROUPS, fetch_live_snapshot, group_counts
 from src.maplibre_realtime import flash_payload, show_realtime_map
 from src.alarme import RING_KM, browser_alarm_payload, edge_distance_km
-from src.estado_abas import kept_value
+from src.estado_abas import keep_widget_values, kept_value
 from src.area_ao_vivo import (clear_live_area, live_area_mode_control, queue_map_point, queue_map_rectangle,
                               render_live_area_panel)
 from src.previsao_flash import render_trend_tab
@@ -435,6 +435,88 @@ def _geometry_from_payload(payload: dict):
     raise ValueError(f"Recorte espacial não reconhecido: {level}")
 
 
+AREA_LEVELS = ["Brasil", "Estado", "Município", "Retângulo", "Buffer circular", "Arquivo"]
+_FILE_TABS = {"clim": "Climatologia", "series": "Séries temporais", "series_cmp": "Séries, 2ª área"}
+
+
+@st.cache_data(ttl=6 * 3600, max_entries=16, show_spinner=False)
+def _grid_ready_wkb(wkb_hex: str) -> str:
+    """Polígono de um arquivo pronto para a grade de 0,08° (~9 km): válido e simplificado a ~200 m.
+
+    Shapefiles oficiais têm dezenas de milhares de vértices; simplificar não muda nenhuma célula da grade e deixa
+    o recorte e o cache leves.
+    """
+    from shapely import from_wkb, make_valid
+
+    geom = make_valid(from_wkb(bytes.fromhex(wkb_hex)))
+    return geom.simplify(0.002, preserve_topology=True).wkb.hex()
+
+
+def _uploaded_areas(exclude: str) -> dict[str, dict]:
+    """Arquivos de área já enviados nesta sessão, em qualquer aba: {nome na lista: {"wkb", "label"}}."""
+    found = {}
+    if st.session_state.get("fv_user_polygon_wkb"):
+        name = st.session_state.get("fv_uploaded_name") or "arquivo"
+        found[f"{name} (aba ao vivo)"] = {"wkb": st.session_state["fv_user_polygon_wkb"], "label": f"Arquivo {name}"}
+    trend = st.session_state.get("fv_trend_file")
+    if trend and trend.get("wkb"):
+        found[f"{trend['label']} (Tendência)"] = {"wkb": trend["wkb"], "label": trend["label"]}
+    for prefix, tab in _FILE_TABS.items():
+        stored = st.session_state.get(f"{prefix}_file")
+        if prefix != exclude and stored:
+            found[f"{stored['label']} ({tab})"] = stored
+    return found
+
+
+def _file_area(payload: dict, prefix: str) -> tuple[dict, bool]:
+    """Recorte por arquivo (shapefile em ZIP, KML, KMZ ou GeoJSON), como na aba ao vivo e na Tendência."""
+    import hashlib
+
+    from src.previsao_flash import area_from_upload
+
+    version = int(st.session_state.get(f"{prefix}_upload_version", 0))
+    uploaded = st.file_uploader(
+        "Arquivo da área: shapefile (ZIP com .shp, .shx, .dbf e .prj), KML, KMZ ou GeoJSON, até 20 MB",
+        type=["zip", "kmz", "kml", "geojson", "json"], key=f"{prefix}_upload_{version}",
+    )
+    if uploaded is not None:
+        blob = uploaded.getvalue()
+        digest = hashlib.sha256(blob).hexdigest()
+        if digest != (st.session_state.get(f"{prefix}_file") or {}).get("digest"):
+            try:
+                geom, label = area_from_upload(uploaded.name, blob)
+                st.session_state[f"{prefix}_file"] = {"digest": digest, "wkb": geom.wkb.hex(), "label": label}
+            except Exception as exc:
+                st.error(f"Não foi possível usar o arquivo: {exc}")
+    stored = st.session_state.get(f"{prefix}_file")
+    if not stored:
+        others = _uploaded_areas(exclude=prefix)
+        if others:
+            pick = st.selectbox("Ou use um arquivo já enviado em outra aba", ["—", *others],
+                                key=f"{prefix}_file_reuse")
+            if pick != "—":
+                stored = others[pick]
+    if not stored:
+        st.info("Envie o arquivo com o polígono da área (por exemplo, o contorno de uma bacia).")
+        return payload, False
+    wkb_hex = _grid_ready_wkb(stored["wkb"])
+    info, rm = st.columns([0.72, 0.28], vertical_alignment="center")
+    info.caption(f"Área: {stored['label']}. No mapa, o recorte usa os centros das células da grade (~0,08°); "
+                 "na série temporal, cada célula entra pela fração da sua área dentro do polígono.")
+    if st.session_state.get(f"{prefix}_file") and rm.button("✖ Remover arquivo", key=f"{prefix}_file_reset",
+                                                             width="stretch"):
+        st.session_state.pop(f"{prefix}_file", None)
+        st.session_state[f"{prefix}_upload_version"] = version + 1
+        st.rerun()
+    payload.update(location_label=stored["label"], geometry_wkb_hex=wkb_hex)
+    with st.expander("Pré-visualizar área", expanded=False):
+        from shapely import from_wkb
+
+        st_folium(build_geometry_preview_map(from_wkb(bytes.fromhex(wkb_hex)), label=stored["label"]),
+                  width=None, height=330, returned_objects=[], key=f"{prefix}_file_preview")
+    return payload, True
+
+
 def _spatial_details(spatial_level: str, prefix: str) -> tuple[dict, bool]:
     """Resolve controles administrativos/personalizados sem ler NetCDF."""
     payload = {
@@ -570,6 +652,9 @@ def _spatial_details(spatial_level: str, prefix: str) -> tuple[dict, bool]:
                 key=f"{prefix}_buffer_preview",
             )
         return payload, valid
+
+    if spatial_level == "Arquivo":
+        return _file_area(payload, prefix)
 
     raise ValueError(spatial_level)
 
@@ -941,7 +1026,16 @@ if (tab_clim.open or tab_series.open or tab_rank.open) and historical_repo is no
 # =============================================================================
 # ABA 2 — CLIMATOLOGIA / MAPAS HISTÓRICOS
 # =============================================================================
+# Escolhas das abas históricas que sobrevivem à troca de aba (src/estado_abas.py).
+_HIST_KEEP = [
+    "clim_area", "clim_mode", "clim_scale", "clim_variable",
+    "series_area", "series_scale", "series_variable", "series_compare", "series_cmp_area",
+    *(f"{p}_{k}" for p in _FILE_TABS for k in ("state", "muni_state", "muni", "buffer_source",
+                                                "buffer_state", "buffer_muni", "rectangle_method", "file_reuse")),
+]
+
 if tab_clim.open:
+    keep_widget_values(restore=_HIST_KEEP)
     with tab_clim:
         st.markdown('<div class="section-heading">Climatologia e mapas históricos</div>', unsafe_allow_html=True)
         st.caption(
@@ -977,7 +1071,7 @@ if tab_clim.open:
             with area_col:
                 spatial_level = st.selectbox(
                     "Recorte espacial",
-                    ["Brasil", "Estado", "Município", "Retângulo", "Buffer circular"],
+                    AREA_LEVELS,
                     index=0,
                     key="clim_area",
                 )
@@ -1272,7 +1366,7 @@ if tab_clim.open:
                             "Limite do Brasil" if spatial_level_now == "Brasil"
                             else f"Limite — {location_label}"
                         )
-                        context_geojson = _states_geojson() if spatial_level_now in {"Brasil", "Retângulo", "Buffer circular"} else None
+                        context_geojson = _states_geojson() if spatial_level_now in {"Brasil", "Retângulo", "Buffer circular", "Arquivo"} else None
                         is_anomaly = mode == "Anomalia"
 
                         with st.spinner(f"Montando o mapa — {location_label}..."):
@@ -1464,6 +1558,7 @@ if tab_clim.open:
 # ABA 3 — SÉRIES TEMPORAIS
 # =============================================================================
 if tab_series.open:
+    keep_widget_values(restore=_HIST_KEEP)
     with tab_series:
         st.markdown('<div class="section-heading">Séries temporais</div>', unsafe_allow_html=True)
         st.caption(
@@ -1479,7 +1574,7 @@ if tab_series.open:
                 with controls1:
                     spatial_level = st.selectbox(
                         "Área",
-                        ["Brasil", "Estado", "Município", "Retângulo", "Buffer circular"],
+                        AREA_LEVELS,
                         key="series_area",
                     )
                 with controls2:
@@ -1502,7 +1597,7 @@ if tab_series.open:
                 if st.toggle("Comparar com outra área", key="series_compare"):
                     compare_level = st.selectbox(
                         "Segunda área",
-                        ["Estado", "Município", "Brasil", "Retângulo", "Buffer circular"],
+                        ["Estado", "Município", "Brasil", "Retângulo", "Buffer circular", "Arquivo"],
                         key="series_cmp_area",
                     )
                     compare_payload, compare_valid = _spatial_details(compare_level, "series_cmp")
